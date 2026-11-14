@@ -1,4 +1,4 @@
-// First-person player physics, tactical movement, collision, ADS movement speed, and grenades.
+// First-person player physics, tactical movement, collision, hitboxes, ADS, and grenades.
 import * as THREE from 'three';
 import { soundEngine } from './audio.js';
 
@@ -32,9 +32,38 @@ export function createPlayer(colliders) {
   const moveDir = new THREE.Vector3();
   const wishVel = new THREE.Vector3();
 
+  // Pre-allocated player hitboxes for bot hitscan traces (head, torso, legs)
+  const hitMaterial = new THREE.MeshBasicMaterial({ visible: false });
+  const headHitGeo = new THREE.SphereGeometry(0.26, 8, 8);
+  const headHitMesh = new THREE.Mesh(headHitGeo, hitMaterial);
+  headHitMesh.userData = { isPlayer: true, part: 'head' };
+
+  const torsoHitGeo = new THREE.BoxGeometry(0.55, 0.75, 0.35);
+  const torsoHitMesh = new THREE.Mesh(torsoHitGeo, hitMaterial);
+  torsoHitMesh.userData = { isPlayer: true, part: 'torso' };
+
+  const legsHitGeo = new THREE.BoxGeometry(0.48, 0.72, 0.3);
+  const legsHitMesh = new THREE.Mesh(legsHitGeo, hitMaterial);
+  legsHitMesh.userData = { isPlayer: true, part: 'legs' };
+
+  const hitMeshes = [headHitMesh, torsoHitMesh, legsHitMesh];
+
+  function syncHitboxes() {
+    const p = state.position;
+    const isCrouched = state.crouching;
+
+    headHitMesh.position.set(p.x, p.y + (isCrouched ? 1.0 : 1.62), p.z);
+    torsoHitMesh.position.set(p.x, p.y + (isCrouched ? 0.65 : 1.08), p.z);
+    legsHitMesh.position.set(p.x, p.y + (isCrouched ? 0.25 : 0.36), p.z);
+
+    headHitMesh.updateMatrixWorld();
+    torsoHitMesh.updateMatrixWorld();
+    legsHitMesh.updateMatrixWorld();
+  }
+
   function look(dx, dy) {
     if (state.dead) return;
-    const sens = state.aiming ? 0.0012 : 0.0022; // Slower sensitivity when aiming
+    const sens = state.aiming ? 0.0012 : 0.0022;
     state.yaw -= dx * sens;
     state.pitch = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, state.pitch - dy * sens));
   }
@@ -51,12 +80,10 @@ export function createPlayer(colliders) {
   function damage(amount, attackerPos = null, isHead = false) {
     if (state.dead) return false;
 
-    // Calculate relative damage angle for HUD indicator
     if (attackerPos) {
       const dx = attackerPos.x - state.position.x;
       const dz = attackerPos.z - state.position.z;
-      const hitAngle = Math.atan2(dx, dz) - state.yaw;
-      state.lastHitAngle = hitAngle;
+      state.lastHitAngle = Math.atan2(dx, dz) - state.yaw;
     }
 
     let rem = amount;
@@ -84,6 +111,7 @@ export function createPlayer(colliders) {
     state.recoilYaw = 0;
     state.lastHitAngle = null;
     state.grenades.length = 0;
+    syncHitboxes();
   }
 
   function throwGrenade(type, camera) {
@@ -95,7 +123,7 @@ export function createPlayer(colliders) {
     startPos.addScaledVector(fwd, 0.4);
 
     const throwVel = fwd.clone().multiplyScalar(18.0);
-    throwVel.y += 4.5; // Upward arc
+    throwVel.y += 4.5;
 
     const grenade = {
       type, // 'he' or 'smoke'
@@ -142,19 +170,23 @@ export function createPlayer(colliders) {
   }
 
   function step(dt, keys, wantAds = false, effects = null) {
-    if (state.dead) return;
+    if (state.dead) {
+      syncHitboxes();
+      return;
+    }
 
     state.aiming = wantAds;
 
-    // Crouch handling with smooth eye height lerp
-    const wantCrouch = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyC');
+    // Crouch handling: ShiftLeft, ShiftRight, ControlLeft, ControlRight, KeyC
+    const wantCrouch = keys.has('ShiftLeft') || keys.has('ShiftRight') ||
+                       keys.has('ControlLeft') || keys.has('ControlRight') ||
+                       keys.has('KeyC');
     state.crouching = wantCrouch;
     const targetEye = wantCrouch ? CROUCH_EYE : STAND_EYE;
     const targetHeight = wantCrouch ? CROUCH_HEIGHT : STAND_HEIGHT;
     state.eye += (targetEye - state.eye) * Math.min(1, dt * 14);
     state.height += (targetHeight - state.height) * Math.min(1, dt * 14);
 
-    // Direction vector from input keys
     let forward = 0;
     let right = 0;
     if (keys.has('KeyW')) forward += 1;
@@ -176,7 +208,6 @@ export function createPlayer(colliders) {
       forward * -cos - right * sin
     );
 
-    // Movement speed: sprinting 5.6 m/s, crouching 2.6 m/s, ADS aim-walk 3.1 m/s
     let maxSpeed = 5.6;
     if (wantCrouch) {
       maxSpeed = 2.6;
@@ -186,7 +217,6 @@ export function createPlayer(colliders) {
 
     wishVel.copy(moveDir).multiplyScalar(maxSpeed);
 
-    // Acceleration and ground friction
     if (state.grounded) {
       const currentSpeed = Math.hypot(state.velocity.x, state.velocity.z);
       if (currentSpeed > 0) {
@@ -199,7 +229,6 @@ export function createPlayer(colliders) {
       state.velocity.x += (wishVel.x - state.velocity.x) * Math.min(1, accel * dt);
       state.velocity.z += (wishVel.z - state.velocity.z) * Math.min(1, accel * dt);
 
-      // Jump
       if (keys.has('Space')) {
         state.velocity.y = 7.0;
         state.grounded = false;
@@ -211,7 +240,6 @@ export function createPlayer(colliders) {
       state.velocity.z += wishVel.z * airAccel * dt;
     }
 
-    // Gravity
     state.velocity.y -= 22.0 * dt;
 
     const nextPos = state.position.clone();
@@ -219,7 +247,6 @@ export function createPlayer(colliders) {
     nextPos.z += state.velocity.z * dt;
     nextPos.y += state.velocity.y * dt;
 
-    // Floor and platform collision
     let floorY = 0;
     for (const box of colliders) {
       if (
@@ -247,8 +274,8 @@ export function createPlayer(colliders) {
 
     resolveCollisions(nextPos);
     state.position.copy(nextPos);
+    syncHitboxes();
 
-    // Footstep audio: crouching is silent
     if (state.grounded && groundSpeed() > 1.2 && !wantCrouch) {
       state.stepTimer += dt;
       const stepInterval = state.aiming ? 0.48 : 0.35;
@@ -261,7 +288,6 @@ export function createPlayer(colliders) {
       state.stepTimer = 0;
     }
 
-    // Recoil recovery: standing still recovers faster!
     const isStationary = groundSpeed() < 0.2;
     const recoverRate = (isStationary ? 24.0 : 16.0) * dt;
     state.recoilPitch = Math.max(0, state.recoilPitch - state.recoilPitch * recoverRate);
@@ -273,13 +299,11 @@ export function createPlayer(colliders) {
       const g = state.grenades[i];
       g.timer -= dt;
 
-      // Gravity & motion
       g.vel.y -= 18.0 * dt;
       g.pos.x += g.vel.x * dt;
       g.pos.y += g.vel.y * dt;
       g.pos.z += g.vel.z * dt;
 
-      // Bounce against floor
       if (g.pos.y <= 0.15) {
         g.pos.y = 0.15;
         g.vel.y = -g.vel.y * 0.45;
@@ -289,7 +313,6 @@ export function createPlayer(colliders) {
         if (g.bounces < 3) soundEngine.playGrenadeBounce();
       }
 
-      // Bounce against box colliders
       for (const box of colliders) {
         if (
           g.pos.x >= box.min.x && g.pos.x <= box.max.x &&
@@ -303,7 +326,6 @@ export function createPlayer(colliders) {
         }
       }
 
-      // Detonation
       if (g.timer <= 0) {
         state.grenades.splice(i, 1);
         if (g.type === 'he') {
@@ -321,6 +343,7 @@ export function createPlayer(colliders) {
 
   return {
     state,
+    hitMeshes,
     look,
     recoil,
     groundSpeed,
@@ -329,5 +352,6 @@ export function createPlayer(colliders) {
     throwGrenade,
     step,
     stepGrenades,
+    syncHitboxes,
   };
 }

@@ -29,18 +29,20 @@ function mulberry32(initial) {
 }
 const prng = mulberry32(seed);
 
-// WebGL Renderer
+// WebGL Renderer: calibrated tone mapping and exposure for bright daylight-industrial readability
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.getElementById('game').appendChild(renderer.domElement);
 
 // Scene & Camera
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(PALETTE.canvas);
-scene.fog = new THREE.Fog(new THREE.Color(PALETTE.canvas), 24, 75);
+scene.fog = new THREE.Fog(new THREE.Color(PALETTE.canvas), 35, 95);
 
 const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.05, 160);
 scene.add(camera);
@@ -50,6 +52,8 @@ const world = createWorld(scene);
 const effects = createEffectSystem(scene);
 const hud = createHud();
 const player = createPlayer(world.colliders);
+player.hitMeshes.forEach((mesh) => scene.add(mesh));
+
 const weapon = createWeaponSystem(camera);
 const bots = createBotManager(scene, world, effects);
 const rounds = createRoundManager(world, hud, weapon, player);
@@ -78,7 +82,7 @@ function onLockChange(locked) {
 hud.onPlay(() => {
   if (shot) return;
   input.requestLock();
-  rounds.startNewRound();
+  rounds.startNewRound(bots);
   bots.resetBots();
 });
 
@@ -104,18 +108,15 @@ function shoot() {
   const playerSpeed = player.groundSpeed();
   const spread = weapon.getSpread(playerSpeed, player.state.crouching);
 
-  // Recoil kick applied to player camera
   player.recoil(cfg.recoilPitch, (prng() * 2 - 1) * cfg.recoilYaw);
 
   const muzzlePos = weapon.getMuzzleWorldPos();
   effects.spawnMuzzleFlash(muzzlePos);
 
-  // Sound event reporting for bot acoustic detection
   bots.reportSound(camera.position, cfg.id === 'longbow' ? 50 : 36, 'aero');
 
   scene.updateMatrixWorld(true);
 
-  // Pellets loop: 1 for standard weapons, 8 for shotgun
   const pelletCount = cfg.pellets || 1;
   const allTargets = world.shootables.concat(bots.hitMeshes);
 
@@ -162,29 +163,48 @@ function shoot() {
   hud.updateAmmo(weapon.state.mag, weapon.state.reserve, cfg.name, cfg.category, weapon.state.heGrenades, weapon.state.smokeGrenades);
 }
 
+function checkGrenadeLOS(fromPos, toPos) {
+  const dir = new THREE.Vector3().subVectors(toPos, fromPos);
+  const dist = dir.length();
+  if (dist < 0.1) return true;
+  dir.normalize();
+  raycaster.set(fromPos, dir);
+  raycaster.far = dist;
+  const hits = raycaster.intersectObjects(world.shootables, false);
+  return hits.length === 0;
+}
+
 function handleGrenadeDetonation(type, pos) {
   if (type === 'he') {
-    // Deal splash damage to nearby bots
+    // Check splash damage against bots with Line-of-Sight barrier occlusion
     for (const b of bots.bots) {
       if (b.dead) continue;
       const d = b.mesh.position.distanceTo(pos);
-      if (d < 7.5) {
-        const dmg = Math.floor(THREE.MathUtils.lerp(90, 15, d / 7.5));
-        const killed = bots.damageBot(b, dmg, pos, false, false);
-        if (killed) {
-          rounds.addKillReward();
-          hud.addKillCard('Operative', 'HE Frag', b.name, false, false);
+      if (d < 8.0) {
+        const targetEye = b.mesh.position.clone();
+        targetEye.y += 1.2;
+        if (checkGrenadeLOS(pos, targetEye)) {
+          const dmg = Math.floor(THREE.MathUtils.lerp(95, 20, d / 8.0));
+          const killed = bots.damageBot(b, dmg, pos, false, false);
+          if (killed) {
+            rounds.addKillReward();
+            hud.addKillCard('Operative', 'HE Frag', b.name, false, false);
+          }
         }
       }
     }
 
-    // Check player splash damage
+    // Check player splash damage with Line-of-Sight check
     const dPlayer = player.state.position.distanceTo(pos);
-    if (dPlayer < 7.5) {
-      const pDmg = Math.floor(THREE.MathUtils.lerp(80, 10, dPlayer / 7.5));
-      player.damage(pDmg, pos, false);
-      player.recoil(0.08, 0.04);
-      hud.triggerDamageFlash();
+    if (dPlayer < 8.0) {
+      const pEye = player.state.position.clone();
+      pEye.y += player.state.eye;
+      if (checkGrenadeLOS(pos, pEye)) {
+        const pDmg = Math.floor(THREE.MathUtils.lerp(85, 15, dPlayer / 8.0));
+        player.damage(pDmg, pos, false);
+        player.recoil(0.08, 0.04);
+        hud.triggerDamageFlash();
+      }
     }
   }
 }
@@ -196,7 +216,6 @@ function step(dt) {
 
   weapon.update(dt, input.takeLook(), player.groundSpeed(), player.groundSpeed() > 0.8, wantAds);
 
-  // Sniper optical scope overlay
   if (weapon.state.currentWeaponId === 'longbow' && weapon.state.ads > 0.6) {
     hud.setScopeVisible(true);
   } else {
@@ -207,7 +226,7 @@ function step(dt) {
     hud.addKillCard(killer, gun, 'Operative', isHead, true);
     hud.triggerDamageFlash();
   }, (b) => {
-    // Bot fired
+    // Bot fired event
   });
 
   rounds.step(dt, bots, input.state.keys, effects);
@@ -216,6 +235,7 @@ function step(dt) {
   hud.updateCrosshair(weapon.getSpread(player.groundSpeed(), player.state.crouching));
   hud.updateHealth(player.state.hp);
   hud.updateShield(player.state.shield);
+  hud.updateMinimap(player, bots, world, rounds);
   hud.setScoreboardVisible(input.state.scoreboard);
 }
 
@@ -238,9 +258,8 @@ function frame(now) {
       if (!rounds.state.buyMenuOpen) rounds.openBuyMenu();
     }
 
-    // Weapon selection
+    // Weapon slots
     if (input.state.keys.has('Digit1')) {
-      // Primary weapon
       for (const p of ['phalanx', 'specter', 'breaker', 'longbow']) {
         if (rounds.state.ownedWeapons.has(p)) {
           weapon.selectWeapon(p);
@@ -310,20 +329,21 @@ function runShotScenario(name) {
   document.getElementById('overlay-start').hidden = true;
 
   if (name === 'start') {
-    // 1-buy: Freeze time, buy menu open showing prices and player's money
+    // 1-buy: Striking cover shot: Requisition terminal open in sunlit base with prices, loadouts, and money
     player.respawn(new THREE.Vector3(0, 0, -26));
     player.state.yaw = Math.PI; // Face base interior with crates and signage
-    player.state.pitch = 0.05;
-    rounds.state.credits = 800;
+    player.state.pitch = 0.04;
+    rounds.state.credits = 1200;
     rounds.state.phase = 'START_FREEZE';
     rounds.openBuyMenu();
     hud.updateClock('00:05', 'TACTICAL FREEZE', 'ROUND 1 / 13');
-    hud.updateCash(800);
+    hud.updateCash(1200);
+    hud.updateScores(0, 0);
     settle(12);
   } else if (name === 'fight') {
-    // 2-fight: Mid-round: enemies visible in Lane Alpha, active tracers in flight, full HUD
+    // 2-fight: Mid-round: enemies visible in Lane Alpha, active tracers in flight, radar minimap, full HUD
     player.respawn(new THREE.Vector3(-24, 0, -12));
-    player.state.yaw = 0; // Face down Lane Alpha toward Site A
+    player.state.yaw = 0;
     player.state.pitch = -0.04;
     weapon.selectWeapon('phalanx');
 
@@ -356,29 +376,27 @@ function runShotScenario(name) {
     const playerTarget = new THREE.Vector3(-24, 1.6, -11);
     effects.spawnTracer(enemyMuzzle, playerTarget, true);
 
-    hud.triggerHitmarker(true, 4000); // Amber headshot indicator
+    hud.triggerHitmarker(true, 4000);
     hud.triggerDamageFlash();
-    hud.addKillCard('Operative Cruz', 'Phalanx-4', 'Helix Infiltrator', true, false);
+    hud.addKillCard('Operative Cruz', 'Phalanx-4', 'Helix Striker', true, false);
     hud.updateAmmo(24, 90, 'PHALANX-4 CARBINE', 'RIFLE // FULL AUTO', 1, 1);
     hud.updateHealth(85);
     hud.updateShield(60);
     hud.updateClock('01:24', 'TACTICAL ASSAULT', 'ROUND 3 / 13');
     rounds.state.credits = 3700;
     hud.updateCash(3700);
+    hud.updateScores(1, 1);
   } else if (name === 'plant') {
-    // 3-plant: Charge planted at site, defuse progress, bot approaching
+    // 3-plant: Charge planted at site, defuse progress, approaching enemy bot
     player.respawn(new THREE.Vector3(-24, 0, 1.5));
-    player.state.yaw = 0; // Face Site Alpha beacon pad
-    player.state.pitch = -0.15;
+    player.state.yaw = 0;
+    player.state.pitch = -0.08;
 
-    // Activate holographic beacon at Site Alpha
     effects.activateBeacon(world.sites.alpha.position);
-    effects.spawnSmokeGrenade(new THREE.Vector3(-18, 0, 10)); // Atmospheric smoke cloud
     rounds.state.phase = 'BEACON_PLANTED';
     rounds.state.plantedSite = 'A';
     rounds.state.plantedTime = 28.5;
 
-    // Approaching Helix bot covering the site
     const b1 = bots.bots.find((b) => b.id === 'helix_1');
     if (b1) {
       b1.mesh.position.set(-20, 0, 15);
@@ -387,36 +405,39 @@ function runShotScenario(name) {
     }
 
     hud.showActionPrompt('HOLD [E] TO DISARM BEACON');
-    hud.updateActionProgress(0.68); // 68% defuse progress
+    hud.updateActionProgress(0.68);
     hud.updateClock('00:28', 'BEACON ACTIVE AT SITE ALPHA', 'ROUND 4 / 13');
+    hud.updateScores(2, 1);
     settle(20);
   } else if (name === 'end') {
-    // 4-end: Round decided: win banner, scoreboard overlay, money earned
+    // 4-end: Round decided: win banner, 5v5 telemetry scoreboard overlay, money earned
     player.respawn(new THREE.Vector3(-24, 0, -8));
     player.state.yaw = 0.2;
     player.state.pitch = 0.05;
 
-    rounds.state.scoreAero = 1;
-    rounds.state.scoreHelix = 0;
+    rounds.state.scoreAero = 2;
+    rounds.state.scoreHelix = 1;
     rounds.state.credits = 4050;
-    rounds.state.playerStats.kills = 3;
-    rounds.state.playerStats.deaths = 0;
-    rounds.state.rosterStats.aero_1.kills = 2;
-    rounds.state.rosterStats.helix_1.kills = 1;
-    rounds.state.rosterStats.helix_1.deaths = 1;
+    rounds.state.playerStats.kills = 4;
+    rounds.state.playerStats.deaths = 1;
+    rounds.state.rosterStats.aero_1.kills = 3;
+    rounds.state.rosterStats.aero_2.kills = 1;
+    rounds.state.rosterStats.helix_1.kills = 2;
+    rounds.state.rosterStats.helix_1.deaths = 2;
+    rounds.state.rosterStats.helix_2.kills = 1;
 
-    hud.updateScores(1, 0);
+    hud.updateScores(2, 1);
     hud.updateCash(4050);
 
     const outcome = {
       title: 'ROUND SECURED',
       won: true,
-      reason: 'BEACON DEFUSED & SECTOR SECURED',
+      reason: 'QUANTUM BEACON DISARMED',
       reward: 3250,
     };
     rounds.syncScoreboard(bots);
-    hud.showEndScreen(outcome, 1, 0);
-    hud.setScoreboardVisible(true); // Show telemetry scoreboard
+    hud.showEndScreen(outcome, 2, 1);
+    hud.setScoreboardVisible(true);
     settle(15);
   }
 

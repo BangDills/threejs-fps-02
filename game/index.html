@@ -6,514 +6,169 @@
 <title>Sector-7: Tactical FPS</title>
 <style>
   :root {
-    --canvas: #0d1117;
-    --surface: #161b22;
-    --surface-alt: #21262d;
-    --border: #30363d;
-    --ink: #f0f6fc;
-    --muted: #8b949e;
+    --canvas: #627588;
+    --surface: #324052;
+    --surface-alt: #415267;
+    --border: #5c7088;
+    --ink: #f8fafc;
+    --muted: #a6b7cb;
     --accent: #f59e0b;
     --team-aero: #38bdf8;
     --team-helix: #ef4444;
     --plant: #10b981;
-    --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    --font-ui: system-ui, -apple-system, sans-serif;
+    --font-mono: ui-monospace, monospace;
   }
   * { box-sizing: border-box; }
   html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: var(--canvas);
-    color: var(--ink);
-    font-family: var(--font-ui);
-    user-select: none;
+    margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+    background: var(--canvas); color: var(--ink); font-family: var(--font-ui); user-select: none;
   }
-  #game, #game canvas {
-    position: fixed;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    display: block;
-  }
-  #hud {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 10;
-  }
+  #game, #game canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
 
-  /* Directional Damage Flash */
   #damage-indicator {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0;
+    position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(circle, rgba(239, 68, 68, 0) 55%, rgba(239, 68, 68, 0.45) 100%);
     transition: opacity 120ms ease-out;
   }
   #damage-indicator.active { opacity: 1; }
 
-  /* Scope Overlay for Sniper ADS */
   #scope-overlay {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(circle at center, transparent 32%, rgba(0,0,0,0.95) 33%);
-    display: none;
-    z-index: 9;
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at center, transparent 32%, rgba(10, 14, 20, 0.94) 33%);
+    display: none; z-index: 9;
   }
-  #scope-overlay::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    width: 100%;
-    height: 1px;
-    background: rgba(245, 158, 11, 0.65);
-  }
-  #scope-overlay::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 0;
-    height: 100%;
-    width: 1px;
-    background: rgba(245, 158, 11, 0.65);
-  }
+  #scope-overlay::before { content: ''; position: absolute; left: 0; top: 50%; width: 100%; height: 1px; background: rgba(245, 158, 11, 0.7); }
+  #scope-overlay::after { content: ''; position: absolute; left: 50%; top: 0; height: 100%; width: 1px; background: rgba(245, 158, 11, 0.7); }
 
-  /* Reticle with dynamic bloom */
-  #reticle {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    width: 32px;
-    height: 32px;
-    transform: translate(-50%, -50%);
-  }
-  #reticle i {
-    position: absolute;
-    background: #ffffff;
-    opacity: 0.9;
-    box-shadow: 0 0 2px rgba(0,0,0,0.8);
-    transition: transform 35ms linear;
-  }
+  #reticle { position: fixed; left: 50%; top: 50%; width: 32px; height: 32px; transform: translate(-50%, -50%); }
+  #reticle i { position: absolute; background: #fff; opacity: 0.95; box-shadow: 0 0 2px rgba(0,0,0,0.8); transition: transform 35ms linear; }
   #ret-top { left: 15px; top: 0; width: 2px; height: 8px; }
   #ret-bottom { left: 15px; bottom: 0; width: 2px; height: 8px; }
   #ret-left { top: 15px; left: 0; height: 2px; width: 8px; }
   #ret-right { top: 15px; right: 0; height: 2px; width: 8px; }
   #ret-dot { left: 15px; top: 15px; width: 2px; height: 2px; background: var(--accent); }
 
-  /* Hitmarker */
-  #hitmarker {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    width: 24px;
-    height: 24px;
-    transform: translate(-50%, -50%) rotate(45deg);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 70ms ease-out;
-  }
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; pointer-events: none; transition: opacity 70ms ease-out; }
   #hitmarker.active { opacity: 1; }
-  #hitmarker i { position: absolute; background: #ffffff; box-shadow: 0 0 4px var(--accent); }
+  #hitmarker i { position: absolute; background: #fff; box-shadow: 0 0 4px var(--accent); }
   #hitmarker.headshot i { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
   #hitmarker i:nth-child(1) { left: 11px; top: 0; width: 2px; height: 7px; }
   #hitmarker i:nth-child(2) { left: 11px; bottom: 0; width: 2px; height: 7px; }
   #hitmarker i:nth-child(3) { top: 11px; left: 0; height: 2px; width: 7px; }
   #hitmarker i:nth-child(4) { top: 11px; right: 0; height: 2px; width: 7px; }
 
-  /* Top Match Header */
   #header {
-    position: fixed;
-    top: 18px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    background: rgba(13, 17, 23, 0.9);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 18px;
-    gap: 18px;
-    backdrop-filter: blur(4px);
-    box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center;
+    background: rgba(36, 48, 64, 0.92); border: 1px solid var(--border); border-radius: 6px; padding: 6px 20px;
+    gap: 20px; backdrop-filter: blur(6px); box-shadow: 0 4px 16px rgba(0,0,0,0.35);
   }
-  .team-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 15px;
-    letter-spacing: 0.04em;
-  }
+  .team-status { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; letter-spacing: 0.04em; }
   .team-aero { color: var(--team-aero); }
   .team-helix { color: var(--team-helix); }
-  .score-num {
-    font-family: var(--font-mono);
-    font-size: 22px;
-    padding: 2px 8px;
-    background: var(--surface-alt);
-    border-radius: 4px;
-  }
-  #round-center {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: 140px;
-  }
-  #round-clock {
-    font-family: var(--font-mono);
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--ink);
-    line-height: 1;
-  }
-  #round-phase {
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-top: 2px;
-  }
-  #round-counter {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    color: var(--accent);
-    font-weight: 600;
-  }
+  .score-num { font-family: var(--font-mono); font-size: 22px; padding: 2px 10px; background: var(--surface-alt); border-radius: 4px; }
+  #round-center { display: flex; flex-direction: column; align-items: center; min-width: 140px; }
+  #round-clock { font-family: var(--font-mono); font-size: 24px; font-weight: 700; color: var(--ink); line-height: 1; }
+  #round-phase { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+  #round-counter { font-size: 11px; font-family: var(--font-mono); color: var(--accent); font-weight: 600; }
 
-  /* Bottom Player Status Bars */
-  #player-stats {
-    position: fixed;
-    left: 32px;
-    bottom: 24px;
-    display: flex;
-    gap: 14px;
+  #minimap-frame {
+    position: fixed; top: 18px; left: 24px; width: 150px; height: 150px; border-radius: 50%; overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4); border: 2px solid var(--border); background: rgba(32, 42, 56, 0.9);
   }
+  #minimap-canvas { display: block; width: 150px; height: 150px; }
+
+  #player-stats { position: fixed; left: 32px; bottom: 24px; display: flex; gap: 14px; }
   .stat-card {
-    background: rgba(22, 27, 34, 0.88);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 16px;
-    min-width: 115px;
-    backdrop-filter: blur(4px);
+    background: rgba(36, 48, 64, 0.92); border: 1px solid var(--border); border-radius: 6px; padding: 10px 16px;
+    min-width: 115px; backdrop-filter: blur(6px);
   }
-  .stat-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    margin-bottom: 2px;
-  }
-  .stat-val {
-    font-family: var(--font-mono);
-    font-size: 32px;
-    font-weight: 700;
-    line-height: 1;
-  }
+  .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 2px; }
+  .stat-val { font-family: var(--font-mono); font-size: 32px; font-weight: 700; line-height: 1; }
   #hp-val { color: var(--plant); }
   #ap-val { color: var(--team-aero); }
 
-  /* Ammo & Weapon Readout */
   #weapon-panel {
-    position: fixed;
-    right: 32px;
-    bottom: 24px;
-    text-align: right;
-    background: rgba(22, 27, 34, 0.88);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 20px;
-    backdrop-filter: blur(4px);
+    position: fixed; right: 32px; bottom: 24px; text-align: right; background: rgba(36, 48, 64, 0.92);
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px 20px; backdrop-filter: blur(6px);
   }
-  #gun-category {
-    font-size: 10px;
-    color: var(--accent);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-  }
-  #gun-name {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--ink);
-    text-transform: uppercase;
-  }
-  #ammo-readout {
-    display: flex;
-    align-items: baseline;
-    justify-content: flex-end;
-    gap: 8px;
-    font-family: var(--font-mono);
-    line-height: 1;
-    margin-top: 4px;
-  }
-  #mag-val {
-    font-size: 40px;
-    font-weight: 700;
-    color: var(--ink);
-  }
-  #res-val {
-    font-size: 18px;
-    color: var(--muted);
-  }
-  #gear-row {
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-    margin-top: 6px;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--muted);
-  }
+  #gun-category { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+  #gun-name { font-size: 14px; font-weight: 700; letter-spacing: 0.04em; color: var(--ink); text-transform: uppercase; }
+  #ammo-readout { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; font-family: var(--font-mono); line-height: 1; margin-top: 4px; }
+  #mag-val { font-size: 40px; font-weight: 700; color: var(--ink); }
+  #res-val { font-size: 18px; color: var(--muted); }
+  #gear-row { display: flex; justify-content: flex-end; gap: 12px; margin-top: 6px; font-size: 12px; font-family: var(--font-mono); color: var(--muted); }
   .gear-item { display: flex; align-items: center; gap: 4px; }
   .gear-active { color: var(--plant); }
-  #cash-tag {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--plant);
-    margin-top: 4px;
-  }
+  #cash-tag { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--plant); margin-top: 4px; }
 
-  /* Interaction Progress Bar */
   #action-prompt {
-    position: fixed;
-    top: 60%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    background: rgba(13, 17, 23, 0.88);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 20px;
-    display: none;
+    position: fixed; top: 60%; left: 50%; transform: translate(-50%, -50%); text-align: center;
+    background: rgba(32, 44, 58, 0.92); border: 1px solid var(--border); border-radius: 6px; padding: 10px 22px;
+    display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.4);
   }
-  #action-bar-wrap {
-    width: 220px;
-    height: 8px;
-    background: var(--surface-alt);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-top: 8px;
-  }
-  #action-bar-fill {
-    height: 100%;
-    width: 0%;
-    background: var(--plant);
-    transition: width 40ms linear;
-  }
+  #action-bar-wrap { width: 220px; height: 8px; background: var(--surface-alt); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  #action-bar-fill { height: 100%; width: 0%; background: var(--plant); transition: width 40ms linear; }
 
-  /* Killfeed */
-  #killfeed {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    pointer-events: none;
-  }
+  #killfeed { position: fixed; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
   .kill-card {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(22, 27, 34, 0.88);
-    border-left: 3px solid var(--team-aero);
-    padding: 5px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    animation: fadeCard 4.2s forwards;
+    display: flex; align-items: center; gap: 8px; background: rgba(36, 48, 64, 0.92);
+    border-left: 3px solid var(--team-aero); padding: 6px 12px; border-radius: 4px; font-size: 12px;
+    font-weight: 600; animation: fadeCard 4.2s forwards; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   }
   .kill-card.enemy-kill { border-left-color: var(--team-helix); }
-  .kill-weapon {
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    background: var(--surface-alt);
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
+  .kill-weapon { color: var(--muted); font-family: var(--font-mono); font-size: 11px; background: var(--surface-alt); padding: 2px 6px; border-radius: 3px; }
   .kill-head { color: var(--accent); font-size: 12px; }
-  @keyframes fadeCard {
-    0% { opacity: 0; transform: translateX(20px); }
-    10% { opacity: 1; transform: translateX(0); }
-    80% { opacity: 1; }
-    100% { opacity: 0; }
-  }
+  @keyframes fadeCard { 0% { opacity: 0; transform: translateX(20px); } 10% { opacity: 1; transform: translateX(0); } 80% { opacity: 1; } 100% { opacity: 0; } }
 
-  /* Fullscreen Overlays (Buy Menu, Scoreboard, Start, End) */
   .modal-overlay {
-    position: fixed;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    background: rgba(13, 17, 23, 0.88);
-    z-index: 50;
-    backdrop-filter: blur(6px);
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: rgba(34, 46, 62, 0.52); z-index: 50; backdrop-filter: blur(4px);
   }
   .modal-overlay[hidden] { display: none; }
   .panel-box {
-    width: min(840px, 94vw);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 28px;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.65);
+    width: min(840px, 94vw); background: rgba(44, 56, 74, 0.96); border: 1px solid var(--border);
+    border-radius: 8px; padding: 24px; box-shadow: 0 16px 40px rgba(0,0,0,0.45);
   }
-  .panel-box h2 {
-    margin: 0 0 4px;
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-  .panel-box p {
-    margin: 0 0 18px;
-    color: var(--muted);
-    font-size: 13px;
-    line-height: 1.5;
-  }
+  .panel-box h2 { margin: 0 0 4px; font-size: 26px; font-weight: 700; }
+  .panel-box p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
-  /* Buy Menu Grid */
-  .buy-section-title {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--accent);
-    letter-spacing: 0.06em;
-    margin: 12px 0 8px;
-  }
-  .buy-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
-    gap: 10px;
-    margin-bottom: 14px;
-  }
+  .buy-section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.06em; margin: 10px 0 6px; }
+  .buy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 10px; margin-bottom: 12px; }
   .buy-card {
-    background: var(--surface-alt);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    transition: border-color 120ms ease;
+    background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 12px;
+    display: flex; flex-direction: column; justify-content: space-between; transition: border-color 120ms ease;
   }
   .buy-card:hover { border-color: var(--accent); }
   .buy-title { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
   .buy-type { font-size: 10px; text-transform: uppercase; color: var(--muted); }
-  .buy-specs { font-size: 11px; color: var(--muted); margin: 6px 0; font-family: var(--font-mono); }
+  .buy-specs { font-size: 11px; color: var(--muted); margin: 5px 0; font-family: var(--font-mono); }
   .buy-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
   .buy-cost { font-family: var(--font-mono); font-weight: 700; color: var(--plant); font-size: 13px; }
-  .btn-buy {
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 4px;
-    padding: 5px 12px;
-    font-weight: 700;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .btn-buy:disabled {
-    background: var(--border);
-    color: var(--muted);
-    cursor: not-allowed;
-  }
+  .btn-buy { background: var(--accent); color: #000; border: none; border-radius: 4px; padding: 5px 12px; font-weight: 700; font-size: 11px; cursor: pointer; }
+  .btn-buy:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
 
-  /* Scoreboard Overlay (TAB) */
-  #overlay-score {
-    position: fixed;
-    inset: 0;
-    display: none;
-    place-items: center;
-    background: rgba(13, 17, 23, 0.85);
-    z-index: 40;
-    backdrop-filter: blur(4px);
-  }
+  #overlay-score { position: fixed; inset: 0; display: none; place-items: center; background: rgba(34, 46, 62, 0.52); z-index: 40; backdrop-filter: blur(4px); }
   #overlay-score.active { display: grid; }
   .score-table-wrap {
-    width: min(800px, 92vw);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 24px;
-    box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+    width: min(840px, 94vw); background: rgba(44, 56, 74, 0.96); border: 1px solid var(--border);
+    border-radius: 8px; padding: 22px; box-shadow: 0 12px 36px rgba(0,0,0,0.4);
   }
-  .score-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    margin-bottom: 16px;
-  }
-  .score-table th {
-    text-align: left;
-    padding: 8px 12px;
-    color: var(--muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-  }
-  .score-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
-  }
-  .team-header-row td {
-    font-weight: 700;
-    font-size: 14px;
-    padding-top: 14px;
-  }
+  .score-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
+  .score-table th { text-align: left; padding: 8px 12px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+  .score-table td { padding: 8px 12px; border-bottom: 1px solid rgba(92, 112, 136, 0.35); }
+  .team-header-row td { font-weight: 700; font-size: 14px; padding-top: 12px; }
   .score-mono { font-family: var(--font-mono); }
 
-  /* Controls list */
-  .ctrl-list {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-    margin: 16px 0;
-    padding: 0;
-    list-style: none;
-    font-size: 13px;
-    color: var(--muted);
-  }
+  .ctrl-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 14px 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
   .ctrl-list li { display: flex; align-items: center; gap: 8px; }
-  .ctrl-list kbd {
-    background: var(--surface-alt);
-    border: 1px solid var(--border);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    color: var(--ink);
-  }
+  .ctrl-list kbd { background: var(--surface-alt); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); color: var(--ink); }
 
-  .btn-primary {
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 6px;
-    padding: 10px 22px;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: opacity 120ms ease;
-  }
+  .btn-primary { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; }
   .btn-primary:hover { opacity: 0.9; }
 
-  /* End of round banner */
-  #round-outcome-banner {
-    font-size: 38px;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-  }
+  #round-outcome-banner { font-size: 38px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; margin-bottom: 8px; }
   .win-text { color: var(--plant); text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
   .loss-text { color: var(--team-helix); text-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
 </style>
@@ -525,17 +180,15 @@
   <div id="damage-indicator"></div>
   <div id="scope-overlay"></div>
 
-  <div id="reticle">
-    <i id="ret-top"></i>
-    <i id="ret-bottom"></i>
-    <i id="ret-left"></i>
-    <i id="ret-right"></i>
-    <i id="ret-dot"></i>
+  <div id="minimap-frame">
+    <canvas id="minimap-canvas" width="150" height="150"></canvas>
   </div>
 
-  <div id="hitmarker">
-    <i></i><i></i><i></i><i></i>
+  <div id="reticle">
+    <i id="ret-top"></i><i id="ret-bottom"></i><i id="ret-left"></i><i id="ret-right"></i><i id="ret-dot"></i>
   </div>
+
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
 
   <div id="header">
     <div class="team-status team-aero">
@@ -600,7 +253,7 @@
     </div>
     <div id="buy-grid-container"></div>
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
-      <span style="font-size:12px; color:var(--muted);"><kbd style="background:var(--surface-alt); padding:2px 6px; border-radius:4px; border:1px solid var(--border);">B</kbd> or <kbd style="background:var(--surface-alt); padding:2px 6px; border-radius:4px; border:1px solid var(--border);">ESC</kbd> to exit terminal</span>
+      <span style="font-size:12px; color:var(--muted);"><kbd>B</kbd> or <kbd>ESC</kbd> to exit terminal</span>
       <button id="btn-close-buy" class="btn-primary" type="button">CONFIRM LOADOUT</button>
     </div>
   </div>
@@ -610,8 +263,8 @@
 <div id="overlay-score">
   <div class="score-table-wrap">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 style="margin:0; font-size:18px;">MATCH TELEMETRY</h3>
-      <div style="font-size:12px; color:var(--muted);">HOLD <kbd style="background:var(--surface-alt); padding:2px 6px; border-radius:4px; border:1px solid var(--border);">TAB</kbd> FOR SCOREBOARD</div>
+      <h3 style="margin:0; font-size:18px;">MATCH TELEMETRY (5v5 TACTICAL)</h3>
+      <div style="font-size:12px; color:var(--muted);">HOLD <kbd>TAB</kbd> FOR SCOREBOARD</div>
     </div>
     <table class="score-table">
       <thead>
@@ -634,18 +287,18 @@
   <div class="panel-box" style="text-align:center;">
     <div id="round-outcome-banner" class="win-text">ROUND SECURED</div>
     <p id="round-outcome-sub">AeroSec operatives eliminated hostile presence and preserved the relay.</p>
-    <div style="background:var(--surface-alt); border:1px solid var(--border); border-radius:6px; padding:16px; margin:20px 0; display:flex; justify-content:space-around;">
+    <div style="background:var(--surface-alt); border:1px solid var(--border); border-radius:6px; padding:14px; margin:16px 0; display:flex; justify-content:space-around;">
       <div>
         <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">CREDITS EARNED</div>
         <div id="end-cash-earned" style="font-family:var(--font-mono); font-size:24px; color:var(--plant); font-weight:700;">+$3,250</div>
       </div>
       <div>
         <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">ROUND REASON</div>
-        <div id="end-reason" style="font-size:16px; font-weight:600; margin-top:4px;">HOSTILES NEUTRALIZED</div>
+        <div id="end-reason" style="font-size:15px; font-weight:600; margin-top:4px;">QUANTUM BEACON DISARMED</div>
       </div>
       <div>
         <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">MATCH STATUS</div>
-        <div id="end-match-score" style="font-family:var(--font-mono); font-size:24px; font-weight:700;">1 - 0</div>
+        <div id="end-match-score" style="font-family:var(--font-mono); font-size:24px; font-weight:700;">2 - 1</div>
       </div>
     </div>
     <button id="btn-next-round" class="btn-primary" type="button">READY FOR NEXT ENGAGEMENT</button>
@@ -662,16 +315,16 @@
       <li><kbd>Left Click</kbd> Discharge Weapon</li>
       <li><kbd>Right Click</kbd> Aim Down Sights (ADS)</li>
       <li><kbd>R</kbd> Tactical Reload</li>
-      <li><kbd>Shift / Ctrl</kbd> Stealth Crouch</li>
+      <li><kbd>Shift / Ctrl / C</kbd> Tactical Crouch</li>
       <li><kbd>Space</kbd> Kinetic Vault / Jump</li>
       <li><kbd>B</kbd> Requisition Shop</li>
       <li><kbd>Tab</kbd> Match Scoreboard</li>
       <li><kbd>E</kbd> Plant / Defuse Beacon</li>
-      <li><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Weapon Selection</li>
+      <li><kbd>1</kbd><kbd>2</kbd> Primary / Sidearm</li>
       <li><kbd>4</kbd> HE Frag Grenade</li>
       <li><kbd>5</kbd> Tactical Aerosol Smoke</li>
     </ul>
-    <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+    <div style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
       <span style="font-size:13px; color:var(--muted);">Eliminate all breach forces or secure beacon objectives.</span>
       <button id="btn-enter-game" class="btn-primary" type="button">INITIALIZE OPERATIVE</button>
     </div>

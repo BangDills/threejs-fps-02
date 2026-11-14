@@ -1,4 +1,5 @@
-// DOM HUD management: crosshair bloom, hitmarker, killfeed, requisitions buy menu, scoreboard, and status bars.
+// DOM HUD management: crosshair bloom, hitmarker, killfeed, requisitions buy menu,
+// 10-player match scoreboard, status bars, and 2D tactical radar minimap.
 import { WEAPON_CONFIGS } from './weapon.js';
 
 export function createHud() {
@@ -50,6 +51,9 @@ export function createHud() {
   const elOverlayStart = document.getElementById('overlay-start');
   const elBtnEnterGame = document.getElementById('btn-enter-game');
 
+  const canvasMinimap = document.getElementById('minimap-canvas');
+  const ctxMinimap = canvasMinimap ? canvasMinimap.getContext('2d') : null;
+
   let hitmarkerTimer = null;
   let damageTimer = null;
   let onBuyCallback = null;
@@ -87,11 +91,7 @@ export function createHud() {
 
   function updateHealth(hp) {
     elHp.textContent = String(Math.max(0, Math.ceil(hp)));
-    if (hp <= 25) {
-      elHp.style.color = 'var(--team-helix)';
-    } else {
-      elHp.style.color = 'var(--plant)';
-    }
+    elHp.style.color = hp <= 25 ? 'var(--team-helix)' : 'var(--plant)';
   }
 
   function updateShield(ap) {
@@ -103,12 +103,7 @@ export function createHud() {
     elRes.textContent = `/ ${reserve}`;
     if (weaponName) elGunName.textContent = weaponName.toUpperCase();
     if (weaponCategory) elGunCat.textContent = weaponCategory.toUpperCase();
-    if (mag <= 5) {
-      elMag.style.color = 'var(--accent)';
-    } else {
-      elMag.style.color = 'var(--ink)';
-    }
-
+    elMag.style.color = mag <= 5 ? 'var(--accent)' : 'var(--ink)';
     elHeCount.textContent = `✦ HE FRAG [${heCount}]`;
     elHeCount.className = `gear-item ${heCount > 0 ? 'gear-active' : ''}`;
     elSmokeCount.textContent = `☁ SMOKE [${smokeCount}]`;
@@ -168,6 +163,105 @@ export function createHud() {
     setTimeout(() => {
       if (card.parentNode) card.parentNode.removeChild(card);
     }, 4200);
+  }
+
+  function updateMinimap(player, botsManager, world, rounds) {
+    if (!ctxMinimap) return;
+    const ctx = ctxMinimap;
+    const size = 150;
+    const center = size / 2;
+    const scale = size / 84;
+
+    ctx.clearRect(0, 0, size, size);
+
+    ctx.fillStyle = 'rgba(28, 38, 52, 0.88)';
+    ctx.beginPath();
+    ctx.arc(center, center, center - 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#5c7088';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(center, center);
+
+    ctx.strokeStyle = '#71849a';
+    ctx.lineWidth = 1;
+
+    const xWest = -12 * scale;
+    ctx.beginPath();
+    ctx.moveTo(xWest, -36 * scale); ctx.lineTo(xWest, -6 * scale);
+    ctx.moveTo(xWest, 6 * scale); ctx.lineTo(xWest, 36 * scale);
+    ctx.stroke();
+
+    const xEast = 12 * scale;
+    ctx.beginPath();
+    ctx.moveTo(xEast, -36 * scale); ctx.lineTo(xEast, -6 * scale);
+    ctx.moveTo(xEast, 6 * scale); ctx.lineTo(xEast, 36 * scale);
+    ctx.stroke();
+
+    const posA = world.sites.alpha.position;
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
+    ctx.beginPath();
+    ctx.arc(posA.x * scale, posA.z * scale, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#10b981';
+    ctx.font = 'bold 9px ui-monospace, monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('A', posA.x * scale, posA.z * scale);
+
+    const posB = world.sites.bravo.position;
+    ctx.fillStyle = 'rgba(6, 182, 212, 0.4)';
+    ctx.beginPath();
+    ctx.arc(posB.x * scale, posB.z * scale, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#06b6d4';
+    ctx.fillText('B', posB.x * scale, posB.z * scale);
+
+    if (botsManager.droppedBeaconState && botsManager.droppedBeaconState.dropped) {
+      const dbp = botsManager.droppedBeaconState.pos;
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(dbp.x * scale, dbp.z * scale, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const b of botsManager.bots) {
+      if (b.dead) continue;
+      const bx = b.mesh.position.x * scale;
+      const bz = b.mesh.position.z * scale;
+      ctx.fillStyle = b.team === 'aero' ? '#38bdf8' : '#ef4444';
+      ctx.beginPath();
+      ctx.arc(bx, bz, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const px = player.state.position.x * scale;
+    const pz = player.state.position.z * scale;
+    const pYaw = player.state.yaw;
+
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.22)';
+    ctx.beginPath();
+    ctx.moveTo(px, pz);
+    ctx.arc(px, pz, 16, pYaw - Math.PI / 2 - 0.45, pYaw - Math.PI / 2 + 0.45);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(px, pz, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    ctx.font = 'bold 8px ui-monospace, monospace';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', center, 10);
+    ctx.fillText('S', center, size - 4);
+    ctx.fillText('W', 8, center + 3);
+    ctx.fillText('E', size - 8, center + 3);
   }
 
   function showBuyMenu(currentCash, ownedSet) {
@@ -250,20 +344,16 @@ export function createHud() {
   }
 
   function setScoreboardVisible(visible) {
-    if (visible) {
-      elOverlayScore.classList.add('active');
-    } else {
-      elOverlayScore.classList.remove('active');
-    }
+    if (visible) elOverlayScore.classList.add('active');
+    else elOverlayScore.classList.remove('active');
   }
 
   function updateScoreboard(aeroRoster, helixRoster) {
     elScoreBody.innerHTML = '';
 
-    // Team Aero Header
     const trAero = document.createElement('tr');
     trAero.className = 'team-header-row';
-    trAero.innerHTML = `<td colspan="6" style="color:var(--team-aero);">AERO-SEC DEFENSE FORCE</td>`;
+    trAero.innerHTML = `<td colspan="6" style="color:var(--team-aero);">AERO-SEC DEFENSE FORCE (DEFENDERS)</td>`;
     elScoreBody.appendChild(trAero);
 
     aeroRoster.forEach((op) => {
@@ -271,7 +361,7 @@ export function createHud() {
       tr.innerHTML = `
         <td style="font-weight:600;">${op.name}</td>
         <td style="color:var(--muted);">${op.role}</td>
-        <td style="color:${op.alive ? 'var(--plant)' : 'var(--muted)'};">${op.alive ? 'OPERATIONAL' : 'NEUTRALIZED'}</td>
+        <td style="color:${op.alive ? 'var(--plant)' : 'var(--muted)'}; font-weight:600;">${op.alive ? 'OPERATIONAL' : 'NEUTRALIZED'}</td>
         <td class="score-mono">${op.kills}</td>
         <td class="score-mono">${op.deaths}</td>
         <td class="score-mono" style="color:var(--plant);">$${op.credits.toLocaleString()}</td>
@@ -279,10 +369,9 @@ export function createHud() {
       elScoreBody.appendChild(tr);
     });
 
-    // Team Helix Header
     const trHelix = document.createElement('tr');
     trHelix.className = 'team-header-row';
-    trHelix.innerHTML = `<td colspan="6" style="color:var(--team-helix); padding-top:20px;">HELIX SYNDICATE BREACH CORPS</td>`;
+    trHelix.innerHTML = `<td colspan="6" style="color:var(--team-helix); padding-top:18px;">HELIX SYNDICATE BREACH CORPS (INFILTRATORS)</td>`;
     elScoreBody.appendChild(trHelix);
 
     helixRoster.forEach((op) => {
@@ -290,7 +379,7 @@ export function createHud() {
       tr.innerHTML = `
         <td style="font-weight:600;">${op.name}</td>
         <td style="color:var(--muted);">${op.role}</td>
-        <td style="color:${op.alive ? 'var(--team-helix)' : 'var(--muted)'};">${op.alive ? 'ACTIVE' : 'ELIMINATED'}</td>
+        <td style="color:${op.alive ? 'var(--team-helix)' : 'var(--muted)'}; font-weight:600;">${op.alive ? 'ACTIVE' : 'ELIMINATED'}</td>
         <td class="score-mono">${op.kills}</td>
         <td class="score-mono">${op.deaths}</td>
         <td class="score-mono" style="color:var(--plant);">$${op.credits.toLocaleString()}</td>
@@ -343,6 +432,7 @@ export function createHud() {
     updateCash,
     updateClock,
     updateScores,
+    updateMinimap,
     showActionPrompt,
     updateActionProgress,
     hideActionPrompt,

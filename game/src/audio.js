@@ -55,7 +55,6 @@ export const soundEngine = {
       noise.start(now);
       noise.stop(now + 0.11);
     } else if (type === 'shotgun') {
-      // Heavy wide blast: dual filter + low boom + pump action delay
       filter.type = 'lowpass';
       filter.frequency.setValueAtTime(1600, now);
       filter.frequency.exponentialRampToValueAtTime(120, now + 0.28);
@@ -76,7 +75,6 @@ export const soundEngine = {
       osc.start(now);
       osc.stop(now + 0.26);
 
-      // Pump action mechanical cycle at +0.32s
       const pump = ac.createOscillator();
       const pGain = ac.createGain();
       pump.type = 'square';
@@ -108,7 +106,6 @@ export const soundEngine = {
       osc.start(now);
       osc.stop(now + 0.35);
     } else {
-      // Standard rifle
       filter.type = 'lowpass';
       filter.frequency.setValueAtTime(2200, now);
       filter.frequency.exponentialRampToValueAtTime(260, now + 0.22);
@@ -150,13 +147,10 @@ export const soundEngine = {
     const ac = getAudioContext();
     if (!ac) return;
     const now = ac.currentTime;
-
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     osc.type = 'sine';
-
     if (isHeadshot) {
-      // Crisp metallic headshot "dink"
       osc.frequency.setValueAtTime(2400, now);
       osc.frequency.exponentialRampToValueAtTime(3400, now + 0.1);
       gain.gain.setValueAtTime(0.45, now);
@@ -166,7 +160,6 @@ export const soundEngine = {
       gain.gain.setValueAtTime(0.24, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
     }
-
     osc.connect(gain).connect(ac.destination);
     osc.start(now);
     osc.stop(now + (isHeadshot ? 0.16 : 0.08));
@@ -177,7 +170,6 @@ export const soundEngine = {
     if (!ac) return;
     const now = ac.currentTime;
 
-    // Mag drop
     const osc1 = ac.createOscillator();
     const g1 = ac.createGain();
     osc1.type = 'square';
@@ -188,7 +180,6 @@ export const soundEngine = {
     osc1.start(now);
     osc1.stop(now + 0.07);
 
-    // Mag insert
     const osc2 = ac.createOscillator();
     const g2 = ac.createGain();
     osc2.type = 'triangle';
@@ -199,7 +190,6 @@ export const soundEngine = {
     osc2.start(now + 0.55);
     osc2.stop(now + 0.68);
 
-    // Bolt rack
     const osc3 = ac.createOscillator();
     const g3 = ac.createGain();
     osc3.type = 'sawtooth';

@@ -1,29 +1,20 @@
-// Visual effects: bullet tracers, muzzle flash, impact sparks, footstep dust, smoke volume, and beacon holograms.
+// Visual effects engine: 100% pre-allocated object pools for tracers, sparks, dust, smoke, and blasts.
+// Hot loops perform zero Object3D, geometry, or material allocations.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
 export function createEffectSystem(scene) {
-  const tracers = [];
-  const particles = [];
-  const flashes = [];
-  const beaconMeshes = [];
-  const activeSmokes = [];
-
-  const flashLight = new THREE.PointLight(PALETTE.flash, 0, 10);
-  scene.add(flashLight);
-
-  // Reusable materials
   const matTracerPlayer = new THREE.LineBasicMaterial({ color: PALETTE.tracer, linewidth: 2 });
   const matTracerEnemy = new THREE.LineBasicMaterial({ color: PALETTE.tracerEnemy, linewidth: 2 });
   const matSpark = new THREE.MeshBasicMaterial({ color: PALETTE.spark });
-  const matDigitalHit = new THREE.MeshBasicMaterial({ color: PALETTE.aeroSec });
-  const matDust = new THREE.MeshBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.6 });
+  const matDigitalHit = new THREE.MeshBasicMaterial({ color: PALETTE.aeroSecGlow });
+  const matDust = new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.65 });
   const matSmoke = new THREE.MeshStandardMaterial({
     color: PALETTE.smoke,
-    roughness: 0.95,
+    roughness: 0.9,
     metalness: 0.05,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.75,
   });
   const matBeaconAura = new THREE.MeshBasicMaterial({
     color: PALETTE.siteAlphaGlow,
@@ -31,273 +22,404 @@ export function createEffectSystem(scene) {
     opacity: 0.65,
     wireframe: true,
   });
+  const matBlast = new THREE.MeshBasicMaterial({
+    color: PALETTE.blastOrange,
+    transparent: true,
+    opacity: 0.85,
+  });
+
+  const geoSpark = new THREE.BoxGeometry(0.045, 0.045, 0.045);
+  const geoHit = new THREE.TetrahedronGeometry(0.065);
+  const geoDust = new THREE.SphereGeometry(0.14, 6, 6);
+  const geoSmokeSphere = new THREE.SphereGeometry(1.8, 6, 6);
+  const geoBlast = new THREE.SphereGeometry(5.5, 12, 12);
+
+  const flashLight = new THREE.PointLight(PALETTE.flash, 0, 16);
+  scene.add(flashLight);
+  let flashTimer = 0;
+
+  // 1. Tracer Pool (32 pre-allocated lines)
+  const MAX_TRACERS = 32;
+  const tracerPool = [];
+  for (let i = 0; i < MAX_TRACERS; i++) {
+    const posArr = new Float32Array(6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    const line = new THREE.Line(geo, matTracerPlayer);
+    line.visible = false;
+    scene.add(line);
+    tracerPool.push({
+      line, posArr, active: false,
+      fromX: 0, fromY: 0, fromZ: 0,
+      dirX: 0, dirY: 0, dirZ: 0,
+      progress: 0, totalDist: 0, speed: 195.0, length: 5.5,
+    });
+  }
+
+  // 2. Spark Mesh Pool (72 pre-allocated meshes)
+  const MAX_SPARKS = 72;
+  const sparkPool = [];
+  for (let i = 0; i < MAX_SPARKS; i++) {
+    const mesh = new THREE.Mesh(geoSpark, matSpark);
+    mesh.visible = false;
+    scene.add(mesh);
+    sparkPool.push({ mesh, active: false, vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0.28 });
+  }
+
+  // 3. Bloodless Hit Mesh Pool (48 pre-allocated meshes)
+  const MAX_HITS = 48;
+  const hitPool = [];
+  for (let i = 0; i < MAX_HITS; i++) {
+    const mesh = new THREE.Mesh(geoHit, matDigitalHit);
+    mesh.visible = false;
+    scene.add(mesh);
+    hitPool.push({ mesh, active: false, vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0.35 });
+  }
+
+  // 4. Footstep Dust Mesh Pool (24 pre-allocated meshes)
+  const MAX_DUST = 24;
+  const dustPool = [];
+  for (let i = 0; i < MAX_DUST; i++) {
+    const mesh = new THREE.Mesh(geoDust, matDust.clone());
+    mesh.visible = false;
+    scene.add(mesh);
+    dustPool.push({ mesh, active: false, vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0.4 });
+  }
+
+  // 5. Explosion Blast Mesh
+  const blastMesh = new THREE.Mesh(geoBlast, matBlast);
+  blastMesh.visible = false;
+  scene.add(blastMesh);
+  let blastActive = false;
+  let blastLife = 0;
+  const blastMaxLife = 0.55;
+
+  // 6. Smoke Cloud Pool (4 pre-allocated volumetric clusters)
+  const MAX_SMOKES = 4;
+  const smokePool = [];
+  for (let s = 0; s < MAX_SMOKES; s++) {
+    const group = new THREE.Group();
+    for (let j = 0; j < 3; j++) {
+      const mesh = new THREE.Mesh(geoSmokeSphere, matSmoke);
+      mesh.position.set(
+        (j === 0 ? -0.9 : (j === 1 ? 0.9 : 0)),
+        1.1 + j * 0.4,
+        (j === 2 ? 0.9 : -0.5)
+      );
+      group.add(mesh);
+    }
+    group.visible = false;
+    scene.add(group);
+    smokePool.push({
+      group, active: false,
+      posX: 0, posY: 0, posZ: 0,
+      radius: 5.2, life: 0, maxLife: 15.0,
+    });
+  }
+
+  // 7. Beacon Hologram
+  const cylGeo = new THREE.CylinderGeometry(0.8, 1.2, 5.0, 16, 1, true);
+  const beaconCyl = new THREE.Mesh(cylGeo, matBeaconAura);
+  beaconCyl.visible = false;
+  scene.add(beaconCyl);
+
+  const ringGeo = new THREE.RingGeometry(0.8, 3.8, 24);
+  const beaconRing = new THREE.Mesh(ringGeo, matBeaconAura);
+  beaconRing.rotation.x = -Math.PI / 2;
+  beaconRing.visible = false;
+  scene.add(beaconRing);
 
   function spawnTracer(from, to, isEnemy = false) {
-    const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), from.clone()]);
-    const line = new THREE.Line(geo, isEnemy ? matTracerEnemy : matTracerPlayer);
-    scene.add(line);
+    let t = tracerPool.find((item) => !item.active);
+    if (!t) t = tracerPool[0];
 
-    tracers.push({
-      line,
-      from: from.clone(),
-      to: to.clone(),
-      progress: 0,
-      speed: 190.0,
-      length: 5.5,
-      totalDist: from.distanceTo(to),
-    });
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    const dist = Math.hypot(dx, dy, dz) || 0.001;
+
+    t.fromX = from.x; t.fromY = from.y; t.fromZ = from.z;
+    t.dirX = dx / dist; t.dirY = dy / dist; t.dirZ = dz / dist;
+    t.totalDist = dist; t.progress = 0; t.active = true;
+    t.line.material = isEnemy ? matTracerEnemy : matTracerPlayer;
+
+    const arr = t.posArr;
+    arr[0] = from.x; arr[1] = from.y; arr[2] = from.z;
+    arr[3] = from.x; arr[4] = from.y; arr[5] = from.z;
+    t.line.geometry.attributes.position.needsUpdate = true;
+    t.line.visible = true;
   }
 
   function spawnMuzzleFlash(pos) {
     flashLight.position.copy(pos);
-    flashLight.intensity = 4.0;
-    flashes.push({ timer: 0.04 });
+    flashLight.intensity = 4.5;
+    flashTimer = 0.045;
   }
 
-  function spawnWallSparks(pos, normal) {
+  function spawnWallSparks(pos, normal = null) {
     const count = 7;
-    for (let i = 0; i < count; i++) {
-      const geo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
-      const mesh = new THREE.Mesh(geo, matSpark);
-      mesh.position.copy(pos);
-      scene.add(mesh);
+    let spawned = 0;
+    const nx = normal ? normal.x * 3.5 : 0;
+    const ny = normal ? normal.y * 3.5 : 1.5;
+    const nz = normal ? normal.z * 3.5 : 0;
 
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 4.5 + (normal ? normal.x * 3.5 : 0),
-        Math.random() * 4.5 + (normal ? normal.y * 3.5 : 2),
-        (Math.random() - 0.5) * 4.5 + (normal ? normal.z * 3.5 : 0)
-      );
-
-      particles.push({ mesh, vel, life: 0.28, maxLife: 0.28 });
+    for (let i = 0; i < MAX_SPARKS && spawned < count; i++) {
+      const sp = sparkPool[i];
+      if (!sp.active) {
+        sp.active = true;
+        sp.mesh.position.copy(pos);
+        sp.mesh.scale.set(1, 1, 1);
+        sp.mesh.visible = true;
+        sp.vx = (Math.random() - 0.5) * 4.5 + nx;
+        sp.vy = Math.random() * 4.0 + ny;
+        sp.vz = (Math.random() - 0.5) * 4.5 + nz;
+        sp.life = 0.28;
+        sp.maxLife = 0.28;
+        spawned += 1;
+      }
     }
   }
 
   function spawnBloodlessHit(pos) {
     const count = 8;
-    for (let i = 0; i < count; i++) {
-      const geo = new THREE.TetrahedronGeometry(0.06);
-      const mesh = new THREE.Mesh(geo, matDigitalHit);
-      mesh.position.copy(pos);
-      scene.add(mesh);
-
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 5,
-        (Math.random() - 0.5) * 5 + 1.5,
-        (Math.random() - 0.5) * 5
-      );
-
-      particles.push({ mesh, vel, life: 0.35, maxLife: 0.35 });
+    let spawned = 0;
+    for (let i = 0; i < MAX_HITS && spawned < count; i++) {
+      const h = hitPool[i];
+      if (!h.active) {
+        h.active = true;
+        h.mesh.position.copy(pos);
+        h.mesh.scale.set(1, 1, 1);
+        h.mesh.visible = true;
+        h.vx = (Math.random() - 0.5) * 5.2;
+        h.vy = (Math.random() - 0.5) * 5.2 + 1.6;
+        h.vz = (Math.random() - 0.5) * 5.2;
+        h.life = 0.35;
+        h.maxLife = 0.35;
+        spawned += 1;
+      }
     }
   }
 
   function spawnFootstepDust(pos) {
-    for (let i = 0; i < 3; i++) {
-      const geo = new THREE.SphereGeometry(0.12 + Math.random() * 0.08, 6, 6);
-      const mesh = new THREE.Mesh(geo, matDust);
-      mesh.position.set(
-        pos.x + (Math.random() - 0.5) * 0.4,
-        pos.y + 0.05,
-        pos.z + (Math.random() - 0.5) * 0.4
-      );
-      scene.add(mesh);
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.6,
-        0.3 + Math.random() * 0.3,
-        (Math.random() - 0.5) * 0.6
-      );
-      particles.push({ mesh, vel, life: 0.4, maxLife: 0.4, isDust: true });
+    const count = 3;
+    let spawned = 0;
+    for (let i = 0; i < MAX_DUST && spawned < count; i++) {
+      const d = dustPool[i];
+      if (!d.active) {
+        d.active = true;
+        d.mesh.position.set(pos.x + (Math.random() - 0.5) * 0.4, pos.y + 0.05, pos.z + (Math.random() - 0.5) * 0.4);
+        d.mesh.scale.set(1, 1, 1);
+        d.mesh.material.opacity = 0.6;
+        d.mesh.visible = true;
+        d.vx = (Math.random() - 0.5) * 0.6;
+        d.vy = 0.35 + Math.random() * 0.3;
+        d.vz = (Math.random() - 0.5) * 0.6;
+        d.life = 0.4;
+        d.maxLife = 0.4;
+        spawned += 1;
+      }
     }
   }
 
   function spawnSmokeGrenade(pos) {
-    const sphereCount = 9;
-    const smokeGroup = new THREE.Group();
-    smokeGroup.position.copy(pos);
-    scene.add(smokeGroup);
-
-    for (let i = 0; i < sphereCount; i++) {
-      const geo = new THREE.SphereGeometry(1.8 + Math.random() * 0.8, 8, 8);
-      const mesh = new THREE.Mesh(geo, matSmoke);
-      mesh.position.set(
-        (Math.random() - 0.5) * 3.2,
-        0.8 + Math.random() * 2.2,
-        (Math.random() - 0.5) * 3.2
-      );
-      smokeGroup.add(mesh);
-    }
-
-    const smokeObj = {
-      group: smokeGroup,
-      pos: pos.clone(),
-      radius: 5.2,
-      life: 15.0,
-      maxLife: 15.0,
-    };
-    activeSmokes.push(smokeObj);
-    return smokeObj;
+    let s = smokePool.find((item) => !item.active);
+    if (!s) s = smokePool[0];
+    s.active = true;
+    s.posX = pos.x; s.posY = pos.y; s.posZ = pos.z;
+    s.group.position.copy(pos);
+    s.group.visible = true;
+    s.life = 15.0; s.maxLife = 15.0;
+    return s;
   }
 
   function isPointInSmoke(point) {
-    for (const sm of activeSmokes) {
-      if (sm.group.position.distanceTo(point) <= sm.radius) return true;
+    for (const sm of smokePool) {
+      if (!sm.active) continue;
+      const dx = sm.posX - point.x;
+      const dz = sm.posZ - point.z;
+      if (Math.hypot(dx, dz) <= sm.radius) return true;
     }
     return false;
   }
 
   function isRayBlockedBySmoke(from, to) {
-    for (const sm of activeSmokes) {
-      // Line to point distance
-      const lineDir = new THREE.Vector3().subVectors(to, from);
-      const lineLen = lineDir.length();
-      if (lineLen < 0.001) continue;
-      lineDir.normalize();
-
-      const toSmoke = new THREE.Vector3().subVectors(sm.pos, from);
-      const proj = toSmoke.dot(lineDir);
-      if (proj < 0 || proj > lineLen) continue;
-
-      const closestPoint = from.clone().addScaledVector(lineDir, proj);
-      if (closestPoint.distanceTo(sm.pos) <= sm.radius) {
-        return true;
-      }
+    for (const sm of smokePool) {
+      if (!sm.active) continue;
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.001) continue;
+      const ux = dx / len;
+      const uz = dz / len;
+      const wx = sm.posX - from.x;
+      const wz = sm.posZ - from.z;
+      const proj = wx * ux + wz * uz;
+      if (proj < 0 || proj > len) continue;
+      const perpSq = (wx * wx + wz * wz) - (proj * proj);
+      if (perpSq <= sm.radius * sm.radius) return true;
     }
     return false;
   }
 
   function activateBeacon(pos) {
-    // Holographic pillar emitter
-    const cylGeo = new THREE.CylinderGeometry(0.8, 1.2, 5.0, 16, 1, true);
-    const beaconMesh = new THREE.Mesh(cylGeo, matBeaconAura);
-    beaconMesh.position.set(pos.x, pos.y + 2.5, pos.z);
-    scene.add(beaconMesh);
-    beaconMeshes.push(beaconMesh);
+    beaconCyl.position.set(pos.x, pos.y + 2.5, pos.z);
+    beaconCyl.visible = true;
+    beaconRing.position.set(pos.x, pos.y + 0.05, pos.z);
+    beaconRing.visible = true;
+  }
 
-    // Ground wave ring
-    const ringGeo = new THREE.RingGeometry(0.8, 3.8, 24);
-    const ringMesh = new THREE.Mesh(ringGeo, matBeaconAura);
-    ringMesh.rotation.x = -Math.PI / 2;
-    ringMesh.position.set(pos.x, pos.y + 0.05, pos.z);
-    scene.add(ringMesh);
-    beaconMeshes.push(ringMesh);
+  function deactivateBeacon() {
+    beaconCyl.visible = false;
+    beaconRing.visible = false;
   }
 
   function spawnExplosion(pos) {
-    // Expanding blast fireball
-    const geo = new THREE.SphereGeometry(5.5, 14, 14);
-    const mat = new THREE.MeshBasicMaterial({ color: PALETTE.blastOrange, transparent: true, opacity: 0.9 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(pos);
-    scene.add(mesh);
-    particles.push({ mesh, vel: new THREE.Vector3(), life: 0.55, maxLife: 0.55, isBlast: true });
+    blastMesh.position.copy(pos);
+    blastMesh.scale.set(1, 1, 1);
+    blastMesh.visible = true;
+    blastActive = true;
+    blastLife = blastMaxLife;
 
-    // Flash light
     flashLight.position.copy(pos);
-    flashLight.intensity = 8.0;
-    flashes.push({ timer: 0.18 });
+    flashLight.intensity = 8.5;
+    flashTimer = 0.18;
 
-    // Shrapnel sparks
-    for (let i = 0; i < 18; i++) {
-      const spGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-      const spMesh = new THREE.Mesh(spGeo, matSpark);
-      spMesh.position.copy(pos);
-      scene.add(spMesh);
-      const spVel = new THREE.Vector3(
-        (Math.random() - 0.5) * 16,
-        Math.random() * 10 + 2,
-        (Math.random() - 0.5) * 16
-      );
-      particles.push({ mesh: spMesh, vel: spVel, life: 0.65, maxLife: 0.65 });
+    const count = 16;
+    let spawned = 0;
+    for (let i = 0; i < MAX_SPARKS && spawned < count; i++) {
+      const sp = sparkPool[i];
+      if (!sp.active) {
+        sp.active = true;
+        sp.mesh.position.copy(pos);
+        sp.mesh.scale.set(1.4, 1.4, 1.4);
+        sp.mesh.visible = true;
+        sp.vx = (Math.random() - 0.5) * 16.0;
+        sp.vy = Math.random() * 9.0 + 3.0;
+        sp.vz = (Math.random() - 0.5) * 16.0;
+        sp.life = 0.65;
+        sp.maxLife = 0.65;
+        spawned += 1;
+      }
     }
   }
 
   function step(dt) {
-    // Tracers
-    for (let i = tracers.length - 1; i >= 0; i--) {
-      const t = tracers[i];
-      t.progress += (t.speed * dt);
+    // 1. Tracers
+    for (let i = 0; i < MAX_TRACERS; i++) {
+      const t = tracerPool[i];
+      if (!t.active) continue;
+      t.progress += t.speed * dt;
       const headDist = Math.min(t.totalDist, t.progress);
       const tailDist = Math.max(0, t.progress - t.length);
 
-      const dir = new THREE.Vector3().subVectors(t.to, t.from).normalize();
-      const head = t.from.clone().addScaledVector(dir, headDist);
-      const tail = t.from.clone().addScaledVector(dir, tailDist);
-
-      const positions = t.line.geometry.attributes.position.array;
-      positions[0] = tail.x;
-      positions[1] = tail.y;
-      positions[2] = tail.z;
-      positions[3] = head.x;
-      positions[4] = head.y;
-      positions[5] = head.z;
+      const arr = t.posArr;
+      arr[0] = t.fromX + t.dirX * tailDist;
+      arr[1] = t.fromY + t.dirY * tailDist;
+      arr[2] = t.fromZ + t.dirZ * tailDist;
+      arr[3] = t.fromX + t.dirX * headDist;
+      arr[4] = t.fromY + t.dirY * headDist;
+      arr[5] = t.fromZ + t.dirZ * headDist;
       t.line.geometry.attributes.position.needsUpdate = true;
 
       if (tailDist >= t.totalDist) {
-        scene.remove(t.line);
-        t.line.geometry.dispose();
-        tracers.splice(i, 1);
+        t.active = false;
+        t.line.visible = false;
       }
     }
 
-    // Flashes
-    for (let i = flashes.length - 1; i >= 0; i--) {
-      flashes[i].timer -= dt;
-      if (flashes[i].timer <= 0) {
-        flashLight.intensity = 0;
-        flashes.splice(i, 1);
-      }
+    if (flashTimer > 0) {
+      flashTimer -= dt;
+      if (flashTimer <= 0) flashLight.intensity = 0;
     }
 
     // Active Smokes
-    for (let i = activeSmokes.length - 1; i >= 0; i--) {
-      const sm = activeSmokes[i];
+    for (let i = 0; i < MAX_SMOKES; i++) {
+      const sm = smokePool[i];
+      if (!sm.active) continue;
       sm.life -= dt;
       sm.group.rotation.y += 0.04 * dt;
       if (sm.life <= 0) {
-        scene.remove(sm.group);
-        activeSmokes.splice(i, 1);
+        sm.active = false;
+        sm.group.visible = false;
       }
     }
 
-    // Particles & Sparks
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.life -= dt;
-      if (p.life <= 0) {
-        scene.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        particles.splice(i, 1);
+    // Sparks
+    for (let i = 0; i < MAX_SPARKS; i++) {
+      const sp = sparkPool[i];
+      if (!sp.active) continue;
+      sp.life -= dt;
+      if (sp.life <= 0) {
+        sp.active = false;
+        sp.mesh.visible = false;
         continue;
       }
+      sp.mesh.position.x += sp.vx * dt;
+      sp.mesh.position.y += sp.vy * dt;
+      sp.mesh.position.z += sp.vz * dt;
+      sp.vy -= 14.0 * dt;
+      sp.mesh.scale.multiplyScalar(0.96);
+    }
 
-      if (p.isBlast) {
-        p.mesh.scale.multiplyScalar(1 + 3.5 * dt);
-        p.mesh.material.opacity = (p.life / p.maxLife);
-      } else if (p.isDust) {
-        p.mesh.position.addScaledVector(p.vel, dt);
-        p.mesh.scale.multiplyScalar(1 + 1.2 * dt);
-        p.mesh.material.opacity = (p.life / p.maxLife) * 0.6;
+    // Hits
+    for (let i = 0; i < MAX_HITS; i++) {
+      const h = hitPool[i];
+      if (!h.active) continue;
+      h.life -= dt;
+      if (h.life <= 0) {
+        h.active = false;
+        h.mesh.visible = false;
+        continue;
+      }
+      h.mesh.position.x += h.vx * dt;
+      h.mesh.position.y += h.vy * dt;
+      h.mesh.position.z += h.vz * dt;
+      h.mesh.scale.multiplyScalar(0.95);
+    }
+
+    // Dust
+    for (let i = 0; i < MAX_DUST; i++) {
+      const d = dustPool[i];
+      if (!d.active) continue;
+      d.life -= dt;
+      if (d.life <= 0) {
+        d.active = false;
+        d.mesh.visible = false;
+        continue;
+      }
+      d.mesh.position.x += d.vx * dt;
+      d.mesh.position.y += d.vy * dt;
+      d.mesh.position.z += d.vz * dt;
+      d.mesh.scale.multiplyScalar(1 + 1.1 * dt);
+      d.mesh.material.opacity = (d.life / d.maxLife) * 0.65;
+    }
+
+    if (blastActive) {
+      blastLife -= dt;
+      if (blastLife <= 0) {
+        blastActive = false;
+        blastMesh.visible = false;
       } else {
-        p.mesh.position.addScaledVector(p.vel, dt);
-        p.vel.y -= 14.0 * dt;
-        p.mesh.scale.multiplyScalar(0.96);
+        blastMesh.scale.multiplyScalar(1 + 3.2 * dt);
+        matBlast.opacity = (blastLife / blastMaxLife) * 0.85;
       }
     }
 
-    // Beacon pulsing animation
-    for (const b of beaconMeshes) {
-      b.rotation.y += 0.8 * dt;
+    if (beaconCyl.visible) {
+      beaconCyl.rotation.y += 0.8 * dt;
+      beaconRing.rotation.z += 0.4 * dt;
     }
   }
 
   function clear() {
-    tracers.forEach((t) => scene.remove(t.line));
-    particles.forEach((p) => scene.remove(p.mesh));
-    beaconMeshes.forEach((b) => scene.remove(b));
-    activeSmokes.forEach((s) => scene.remove(s.group));
-    tracers.length = 0;
-    particles.length = 0;
-    beaconMeshes.length = 0;
-    activeSmokes.length = 0;
+    tracerPool.forEach((t) => { t.active = false; t.line.visible = false; });
+    sparkPool.forEach((s) => { s.active = false; s.mesh.visible = false; });
+    hitPool.forEach((h) => { h.active = false; h.mesh.visible = false; });
+    dustPool.forEach((d) => { d.active = false; d.mesh.visible = false; });
+    smokePool.forEach((sm) => { sm.active = false; sm.group.visible = false; });
+    blastActive = false;
+    blastMesh.visible = false;
+    deactivateBeacon();
     flashLight.intensity = 0;
   }
 
@@ -311,6 +433,7 @@ export function createEffectSystem(scene) {
     isPointInSmoke,
     isRayBlockedBySmoke,
     activateBeacon,
+    deactivateBeacon,
     spawnExplosion,
     step,
     clear,
