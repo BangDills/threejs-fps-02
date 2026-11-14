@@ -1,4 +1,4 @@
-// First-person player physics, movement, crouching, collision, and camera tracking.
+// First-person player physics, tactical movement, collision, ADS movement speed, and grenades.
 import * as THREE from 'three';
 import { soundEngine } from './audio.js';
 
@@ -19,11 +19,14 @@ export function createPlayer(colliders) {
     eye: STAND_EYE,
     height: STAND_HEIGHT,
     crouching: false,
+    aiming: false,
     grounded: true,
     hp: 100,
     shield: 100,
     dead: false,
     stepTimer: 0,
+    lastHitAngle: null,
+    grenades: [],
   };
 
   const moveDir = new THREE.Vector3();
@@ -31,9 +34,9 @@ export function createPlayer(colliders) {
 
   function look(dx, dy) {
     if (state.dead) return;
-    const SENS = 0.0022;
-    state.yaw -= dx * SENS;
-    state.pitch = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, state.pitch - dy * SENS));
+    const sens = state.aiming ? 0.0012 : 0.0022; // Slower sensitivity when aiming
+    state.yaw -= dx * sens;
+    state.pitch = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, state.pitch - dy * sens));
   }
 
   function recoil(pitchKick, yawKick) {
@@ -45,18 +48,28 @@ export function createPlayer(colliders) {
     return Math.hypot(state.velocity.x, state.velocity.z);
   }
 
-  function damage(amount) {
+  function damage(amount, attackerPos = null, isHead = false) {
     if (state.dead) return false;
+
+    // Calculate relative damage angle for HUD indicator
+    if (attackerPos) {
+      const dx = attackerPos.x - state.position.x;
+      const dz = attackerPos.z - state.position.z;
+      const hitAngle = Math.atan2(dx, dz) - state.yaw;
+      state.lastHitAngle = hitAngle;
+    }
+
     let rem = amount;
-    if (state.shield > 0) {
-      const absorbed = Math.min(state.shield, rem * 0.6);
+    if (state.shield > 0 && !isHead) {
+      const absorbed = Math.min(state.shield, rem * 0.65);
       state.shield -= absorbed;
       rem -= absorbed;
     }
+
     state.hp = Math.max(0, state.hp - rem);
     if (state.hp <= 0) {
       state.dead = true;
-      return true;
+      return true; // Fatal
     }
     return false;
   }
@@ -69,6 +82,30 @@ export function createPlayer(colliders) {
     state.dead = false;
     state.recoilPitch = 0;
     state.recoilYaw = 0;
+    state.lastHitAngle = null;
+    state.grenades.length = 0;
+  }
+
+  function throwGrenade(type, camera) {
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+
+    const startPos = state.position.clone();
+    startPos.y += state.eye;
+    startPos.addScaledVector(fwd, 0.4);
+
+    const throwVel = fwd.clone().multiplyScalar(18.0);
+    throwVel.y += 4.5; // Upward arc
+
+    const grenade = {
+      type, // 'he' or 'smoke'
+      pos: startPos,
+      vel: throwVel,
+      timer: type === 'he' ? 1.8 : 1.4,
+      bounces: 0,
+    };
+    state.grenades.push(grenade);
+    return grenade;
   }
 
   function resolveCollisions(nextPos) {
@@ -77,10 +114,8 @@ export function createPlayer(colliders) {
     const r = PLAYER_RADIUS;
 
     for (const box of colliders) {
-      // Check vertical overlap
       if (pMaxY <= box.min.y || pMinY >= box.max.y) continue;
 
-      // Find closest point on box in XZ plane
       const cx = Math.max(box.min.x, Math.min(box.max.x, nextPos.x));
       const cz = Math.max(box.min.z, Math.min(box.max.z, nextPos.z));
 
@@ -94,11 +129,9 @@ export function createPlayer(colliders) {
         const nx = dx / dist;
         const nz = dz / dist;
 
-        // Push away from obstacle
         nextPos.x += nx * overlap;
         nextPos.z += nz * overlap;
 
-        // Zero out velocity along normal
         const normalDot = state.velocity.x * nx + state.velocity.z * nz;
         if (normalDot < 0) {
           state.velocity.x -= normalDot * nx;
@@ -108,8 +141,10 @@ export function createPlayer(colliders) {
     }
   }
 
-  function step(dt, keys) {
+  function step(dt, keys, wantAds = false, effects = null) {
     if (state.dead) return;
+
+    state.aiming = wantAds;
 
     // Crouch handling with smooth eye height lerp
     const wantCrouch = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyC');
@@ -141,10 +176,17 @@ export function createPlayer(colliders) {
       forward * -cos - right * sin
     );
 
-    const maxSpeed = wantCrouch ? 2.6 : 5.6;
+    // Movement speed: sprinting 5.6 m/s, crouching 2.6 m/s, ADS aim-walk 3.1 m/s
+    let maxSpeed = 5.6;
+    if (wantCrouch) {
+      maxSpeed = 2.6;
+    } else if (state.aiming) {
+      maxSpeed = 3.1;
+    }
+
     wishVel.copy(moveDir).multiplyScalar(maxSpeed);
 
-    // Acceleration and friction
+    // Acceleration and ground friction
     if (state.grounded) {
       const currentSpeed = Math.hypot(state.velocity.x, state.velocity.z);
       if (currentSpeed > 0) {
@@ -153,18 +195,17 @@ export function createPlayer(colliders) {
         state.velocity.x = (state.velocity.x / currentSpeed) * newSpeed;
         state.velocity.z = (state.velocity.z / currentSpeed) * newSpeed;
       }
-      // Accelerate toward wish velocity
       const accel = 38.0;
       state.velocity.x += (wishVel.x - state.velocity.x) * Math.min(1, accel * dt);
       state.velocity.z += (wishVel.z - state.velocity.z) * Math.min(1, accel * dt);
 
       // Jump
       if (keys.has('Space')) {
-        state.velocity.y = 7.2;
+        state.velocity.y = 7.0;
         state.grounded = false;
+        if (effects) effects.spawnFootstepDust(state.position);
       }
     } else {
-      // Air acceleration
       const airAccel = 8.0;
       state.velocity.x += wishVel.x * airAccel * dt;
       state.velocity.z += wishVel.z * airAccel * dt;
@@ -173,15 +214,13 @@ export function createPlayer(colliders) {
     // Gravity
     state.velocity.y -= 22.0 * dt;
 
-    // Projected position
     const nextPos = state.position.clone();
     nextPos.x += state.velocity.x * dt;
     nextPos.z += state.velocity.z * dt;
     nextPos.y += state.velocity.y * dt;
 
-    // Check floor collision
+    // Floor and platform collision
     let floorY = 0;
-    // Check if on a box (like catwalk at Y=2.0)
     for (const box of colliders) {
       if (
         nextPos.x >= box.min.x - PLAYER_RADIUS &&
@@ -189,13 +228,16 @@ export function createPlayer(colliders) {
         nextPos.z >= box.min.z - PLAYER_RADIUS &&
         nextPos.z <= box.max.z + PLAYER_RADIUS
       ) {
-        if (state.position.y >= box.max.y - 0.2 && box.max.y > floorY) {
+        if (state.position.y >= box.max.y - 0.25 && box.max.y > floorY) {
           floorY = box.max.y;
         }
       }
     }
 
     if (nextPos.y <= floorY) {
+      if (!state.grounded && state.velocity.y < -4.0 && effects) {
+        effects.spawnFootstepDust(nextPos);
+      }
       nextPos.y = floorY;
       state.velocity.y = 0;
       state.grounded = true;
@@ -203,26 +245,78 @@ export function createPlayer(colliders) {
       state.grounded = false;
     }
 
-    // Resolve horizontal obstacle collisions
     resolveCollisions(nextPos);
     state.position.copy(nextPos);
 
-    // Footstep audio
-    if (state.grounded && groundSpeed() > 1.2) {
+    // Footstep audio: crouching is silent
+    if (state.grounded && groundSpeed() > 1.2 && !wantCrouch) {
       state.stepTimer += dt;
-      const stepInterval = wantCrouch ? 0.55 : 0.36;
+      const stepInterval = state.aiming ? 0.48 : 0.35;
       if (state.stepTimer >= stepInterval) {
         state.stepTimer = 0;
         soundEngine.playStep();
+        if (effects) effects.spawnFootstepDust(state.position);
       }
     } else {
       state.stepTimer = 0;
     }
 
-    // Smooth recoil recovery
-    const recoverRate = 18.0 * dt;
+    // Recoil recovery: standing still recovers faster!
+    const isStationary = groundSpeed() < 0.2;
+    const recoverRate = (isStationary ? 24.0 : 16.0) * dt;
     state.recoilPitch = Math.max(0, state.recoilPitch - state.recoilPitch * recoverRate);
     state.recoilYaw += (0 - state.recoilYaw) * recoverRate;
+  }
+
+  function stepGrenades(dt, effects, onGrenadeDetonate) {
+    for (let i = state.grenades.length - 1; i >= 0; i--) {
+      const g = state.grenades[i];
+      g.timer -= dt;
+
+      // Gravity & motion
+      g.vel.y -= 18.0 * dt;
+      g.pos.x += g.vel.x * dt;
+      g.pos.y += g.vel.y * dt;
+      g.pos.z += g.vel.z * dt;
+
+      // Bounce against floor
+      if (g.pos.y <= 0.15) {
+        g.pos.y = 0.15;
+        g.vel.y = -g.vel.y * 0.45;
+        g.vel.x *= 0.65;
+        g.vel.z *= 0.65;
+        g.bounces += 1;
+        if (g.bounces < 3) soundEngine.playGrenadeBounce();
+      }
+
+      // Bounce against box colliders
+      for (const box of colliders) {
+        if (
+          g.pos.x >= box.min.x && g.pos.x <= box.max.x &&
+          g.pos.z >= box.min.z && g.pos.z <= box.max.z &&
+          g.pos.y >= box.min.y && g.pos.y <= box.max.y
+        ) {
+          g.vel.x = -g.vel.x * 0.5;
+          g.vel.z = -g.vel.z * 0.5;
+          soundEngine.playGrenadeBounce();
+          break;
+        }
+      }
+
+      // Detonation
+      if (g.timer <= 0) {
+        state.grenades.splice(i, 1);
+        if (g.type === 'he') {
+          soundEngine.playExplosion();
+          if (effects) effects.spawnExplosion(g.pos);
+          if (onGrenadeDetonate) onGrenadeDetonate('he', g.pos);
+        } else if (g.type === 'smoke') {
+          soundEngine.playSmokeHiss();
+          if (effects) effects.spawnSmokeGrenade(g.pos);
+          if (onGrenadeDetonate) onGrenadeDetonate('smoke', g.pos);
+        }
+      }
+    }
   }
 
   return {
@@ -232,6 +326,8 @@ export function createPlayer(colliders) {
     groundSpeed,
     damage,
     respawn,
+    throwGrenade,
     step,
+    stepGrenades,
   };
 }

@@ -1,47 +1,60 @@
 # Sector-7: Tactical FPS
 
-A high-performance tactical first-person shooter built on Three.js 0.187.0 with pure ES modules, deterministic rendering, and no external dependencies or binary assets.
+A high-performance tactical first-person shooter built on Three.js 0.187.0 with pure ES modules, fixed-step simulation, deterministic rendering, and zero binary assets.
 
 ## Setting & Narrative
 
-Operatives of **AeroSec Tactical Defense** hold the fortified **Sector-7 Relay Complex**, a brutalist industrial facility housing quantum communications arrays. **Helix Syndicate** breach units have infiltrated the perimeter attempting to deploy a Quantum Beacon at Site Alpha or Site Bravo. AeroSec must neutralize all hostile breach forces or disarm planted beacons before detonation.
+Operatives of **AeroSec Tactical Defense** hold the fortified **Sector-7 Relay Complex**, an industrial facility housing high-security quantum communications arrays. **Helix Syndicate** breach corps units have infiltrated the perimeter attempting to deploy a Quantum Beacon at Site Alpha (Reactor Core) or Site Bravo (Data Archive). AeroSec must neutralize all hostile breach forces or disarm planted beacons before detonation.
 
 ## Key Features
 
 1. **Tactical Gunplay & Ballistics**
-   - Headshot body-part precision multiplier (3.5x damage on head hits, 1.0x torso, 0.75x limbs).
-   - Recoil curves: continuous firing kicks weapon upward with lateral sway.
-   - Dynamic bloom & spread: moving significantly penalizes accuracy (up to 3.8x spread); stopping and crouching delivers laser precision.
-   - Distinct arsenal:
+   - Headshot body-part precision multiplier (3.5x damage on head hits, 1.0x torso, 0.75x limbs with distance damage falloff).
+   - Recoil curves: continuous firing kicks weapon upward with lateral sway; standing still recovers recoil rapidly.
+   - Dynamic bloom & spread: moving significantly penalizes accuracy (up to 3.8x spread on rifles, 8.0x on rail sniper); crouching tightens spread by 45%.
+   - Aim Down Sights (ADS) via Right Mouse Button: smooth FOV zoom, reduced weapon sway, and tighter spread.
+   - Distinct 5-weapon arsenal with procedural 3D viewmodels:
      - **Viper-9 Tactical Sidearm**: Lightweight semi-auto sidearm with rapid recovery ($0).
-     - **Phalanx-4 Kinetic Carbine**: Versatile standard-issue assault rifle ($2,900).
-     - **Specter-9 Pulse SMG**: High-rate-of-fire close-quarters weapon ($1,600).
-     - **Longbow-X Rail Sniper**: Heavy bolt-action marksman rifle capable of 1-hit elimination ($4,600).
-     - **Aerosol Smoke Utility**: Deployable volumetric concealment canister ($300).
-     - **Kevlar Shield**: Ballistic body armor and helmet absorbing up to 60% of incoming damage ($650).
+     - **Specter-9 Pulse SMG**: High-rate-of-fire (920 RPM) close-quarters submachine gun ($1,600).
+     - **Breaker-12 Tactical Shotgun**: 8 pellets per shell (128 max damage close range), pump-action rhythm ($1,800).
+     - **Phalanx-4 Assault Carbine**: Versatile standard-issue assault rifle with high lethality ($2,900).
+     - **Longbow-X Rail Sniper**: Heavy marksman rifle with high-power optical scope ($4,600).
+   - Throwables & Protection:
+     - **HE Frag Grenade** (`4` key): High-explosive bounce grenade dealing up to 90 splash damage ($300).
+     - **Tactical Aerosol Smoke** (`5` key): Deployable volumetric concealment cloud blocking vision for 15s ($300).
+     - **Kevlar Shield & Helmet**: Absorbs up to 65% of incoming torso and limb damage ($650).
 
 2. **Tactical Bot AI**
-   - Sensory perception: Raycast line-of-sight vision cones (110° FOV) obstructed by map geometry and smoke clouds.
-   - Auditory detection: Bots react to footstep sprints and gunfire audio within range.
-   - Tactical state machine: Waypoint route patrol, angle holding at chokepoints, coordinated crossfires, deliberate human-like aim tracking with dispersion error.
-   - Objective play: Bots carry, calibrate, and defend the Quantum Beacon, or push to defuse.
+   - Fixed-step performance budget with zero per-step heap allocation.
+   - Assigned tactical roles each round:
+     - **Entry**: Aggressive pusher leading site takes and checking angles.
+     - **Support**: Follows entry, covers flanks, provides crossfire.
+     - **Anchor**: Locks down sites and chokepoints, holding tight crouched angles.
+   - Auditory sensing: Bots react to footstep sprints and gunfire within a dynamic sound radius.
+   - Smoke & tactical reaction: Bots cannot see through active smoke clouds and avoid blind fire.
+   - Low HP retreat: When health drops below 35, bots fall back to cover waypoints.
+   - Human-like aim tracking: Error starts large and shrinks smoothly over tracking time.
 
 3. **Level Design & Architecture**
    - **Sector-7 Relay Complex**: A classic three-lane competitive map:
-     - **Lane Alpha**: Long-range exterior courtyard with elevated sniper catwalk and container cover.
-     - **Mid Corridor**: High-stakes central bunker corridor with double blast doors and stacked crates.
-     - **Lane Bravo**: Subterranean generator hall with turbine pillars and conduit arches.
-     - **Site Alpha & Site Bravo**: Dedicated beacon calibration hubs with holographic emitter pads.
-   - Procedural canvas textures: Concrete slabs, diamond-tread metal grates, hazard caution striping, and military stencil crates.
+     - **Lane Alpha**: Exterior courtyard with elevated catwalk platform, container cover, and Site Alpha (Reactor Core).
+     - **Mid Corridor**: High-stakes central bunker corridor with blast doors, signage, and staggered crate stacks.
+     - **Lane Bravo**: Subterranean hall with reactor pillar, hazard markings, and Site Bravo (Data Archive).
+     - **Two Connectors**: West and East connectors linking lanes with arched bulkheads and facility signs.
+   - Procedural canvas textures: Concrete slabs, diamond-tread metal grates, hazard caution striping, military supply crates, and facility signage.
+   - Lighting: Directional sunlight with soft shadows, emerald beacon glow at Alpha, cyan data-hub glow at Bravo, and warm amber illumination in Mid.
 
-4. **Audio & Effects**
-   - Procedural WebAudio synthesis: Synthesized gunshots, Foley reload sounds, footstep thuds, hit pings, headshot chimes, beacon countdown pulses, and detonation rumbles.
-   - Visual FX: High-velocity glowing bullet tracers, dynamic muzzle flash illumination, impact wall sparks, and bloodless digital shield dispersal bursts.
+4. **Procedural WebAudio Synthesizer**
+   - Zero binary audio assets: 100% procedural WebAudio synthesis.
+   - Gunshot acoustics for all 5 weapons (pistol, SMG, rifle, shotgun blast+pump, and rail sniper).
+   - Dry fire click, reload sequence Foley, grenade bounce thuds, explosion rumbles, smoke canister hiss, concrete footsteps, hit tick & headshot metallic dink, beacon pulses, and victory/defeat stingers.
 
 5. **Competitive Match Flow & Economy**
-   - Tactical freeze buy phase, round timer, living unit counters, and round victory/defeat banners.
-   - Economy rewards: Win bonuses ($3,250), loss payouts ($1,400), kill bounties ($300), and objective bonuses.
-   - In-game Requisition Shop (`B` key) with live credit balance and equipment specs.
+   - 13-round match format with buy phase timer, round clock, and win/loss banners.
+   - Economy rewards: Win bonuses ($3,250), loss payouts ($1,400 with loss-streak bonus), kill rewards ($300), and objective plant/defuse rewards.
+   - Categorized Requisition Terminal (`B` key): Sidearms, Primary Armament, and Tactical Gear.
+   - Telemetry Scoreboard (`Tab` key): Complete match statistics for AeroSec and Helix Syndicate.
+   - Directional damage feedback, dynamic reticle spread bloom, and killfeed.
 
 ## Controls
 
@@ -50,12 +63,17 @@ Operatives of **AeroSec Tactical Defense** hold the fortified **Sector-7 Relay C
 | `W`, `A`, `S`, `D` | Tactical Movement |
 | `Mouse` | Look / Precision Aim |
 | `Left Click` | Discharge Weapon |
+| `Right Click` | Aim Down Sights (ADS Zoom) |
 | `R` | Tactical Reload |
 | `Ctrl` / `C` | Crouch (enhances stability & accuracy) |
-| `Space` | Jump |
-| `B` | Requisitions Shop (Buy Menu) |
-| `E` | Calibrate / Disarm Quantum Beacon |
-| `1`, `2`, `3`, `4` | Select Equipped Weapon |
+| `Space` | Vault / Jump |
+| `B` | Requisitions Terminal (Buy Menu) |
+| `Tab` | Match Scoreboard Telemetry |
+| `E` | Plant / Defuse Quantum Beacon |
+| `1` | Equip Primary Weapon |
+| `2` | Equip Sidearm |
+| `4` | Deploy HE Frag Grenade |
+| `5` | Deploy Tactical Aerosol Smoke |
 | `ESC` | Exit Pointer Lock / Close Menus |
 
 ## Technical Architecture

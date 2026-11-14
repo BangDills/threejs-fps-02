@@ -4,28 +4,46 @@ export function createInput(domElement, onLockChange) {
   const lookDelta = { x: 0, y: 0 };
   const state = {
     firing: false,
+    aiming: false,
+    scoreboard: false,
     locked: false,
     keys,
   };
 
   function onKeyDown(e) {
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      state.scoreboard = true;
+    }
     keys.add(e.code);
   }
 
   function onKeyUp(e) {
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      state.scoreboard = false;
+    }
     keys.delete(e.code);
   }
 
   function onMouseDown(e) {
     if (e.button === 0) {
       state.firing = true;
+    } else if (e.button === 2) {
+      state.aiming = true;
     }
   }
 
   function onMouseUp(e) {
     if (e.button === 0) {
       state.firing = false;
+    } else if (e.button === 2) {
+      state.aiming = false;
     }
+  }
+
+  function onContextMenu(e) {
+    e.preventDefault();
   }
 
   function onMouseMove(e) {
@@ -44,6 +62,7 @@ export function createInput(domElement, onLockChange) {
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('mousemove', onMouseMove);
   document.addEventListener('pointerlockchange', onPointerLockChange);
 

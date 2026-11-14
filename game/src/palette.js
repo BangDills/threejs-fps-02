@@ -22,14 +22,18 @@ export const PALETTE = {
   skyLight: 0x2b384e,
   siteAlphaGlow: 0x10b981,
   siteBravoGlow: 0x06b6d4,
+  midLight: 0xf59e0b,
 
   // Teams
   aeroSec: 0x38bdf8,
   helix: 0xef4444,
 
-  // Effects
+  // Effects & Weapons
   tracer: 0xfef08a,
+  tracerEnemy: 0xf87171,
   flash: 0xffedd5,
   spark: 0xf59e0b,
   smoke: 0x94a3b8,
+  grenadeGreen: 0x15803d,
+  blastOrange: 0xf97316,
 };

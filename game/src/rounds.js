@@ -1,17 +1,19 @@
-// Round flow, economy, buy menu, and Quantum Beacon plant/defuse objectives.
+// Round flow, tactical economy, buy menu requisitions, and Quantum Beacon plant/defuse objectives.
 import * as THREE from 'three';
 import { soundEngine } from './audio.js';
 
 export function createRoundManager(world, hud, weaponSystem, player) {
   const state = {
     roundNumber: 1,
-    phase: 'START_FREEZE', // START_FREEZE, ROUND_LIVE, BEACON_PLANTED, ROUND_OVER
+    maxRounds: 13,
+    phase: 'START_FREEZE', // 'START_FREEZE', 'ROUND_LIVE', 'BEACON_PLANTED', 'ROUND_OVER'
     timer: 5.0,
-    roundClock: 105,
+    roundClock: 100,
     plantedTime: 40.0,
     scoreAero: 0,
     scoreHelix: 0,
     credits: 800,
+    lossStreak: 0,
     plantedSite: null, // 'A' or 'B'
     plantProgress: 0,
     defuseProgress: 0,
@@ -20,6 +22,14 @@ export function createRoundManager(world, hud, weaponSystem, player) {
     roundOutcome: null,
     buyMenuOpen: false,
     ownedWeapons: new Set(['viper', 'phalanx']),
+    playerStats: { kills: 0, deaths: 0 },
+    rosterStats: {
+      aero_1: { kills: 0, deaths: 0, credits: 800 },
+      aero_2: { kills: 0, deaths: 0, credits: 800 },
+      helix_1: { kills: 0, deaths: 0, credits: 800 },
+      helix_2: { kills: 0, deaths: 0, credits: 800 },
+      helix_3: { kills: 0, deaths: 0, credits: 800 },
+    },
   };
 
   function openBuyMenu() {
@@ -34,6 +44,7 @@ export function createRoundManager(world, hud, weaponSystem, player) {
 
   function buyItem(itemId, cost) {
     if (state.credits < cost) return false;
+
     if (itemId === 'shield') {
       if (player.state.shield >= 100) return false;
       state.credits -= cost;
@@ -44,18 +55,73 @@ export function createRoundManager(world, hud, weaponSystem, player) {
       return true;
     }
 
+    if (itemId === 'he_grenade') {
+      if (weaponSystem.state.heGrenades >= 2) return false;
+      state.credits -= cost;
+      weaponSystem.state.heGrenades += 1;
+      hud.updateCash(state.credits);
+      hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name, weaponSystem.state.config.category, weaponSystem.state.heGrenades, weaponSystem.state.smokeGrenades);
+      hud.showBuyMenu(state.credits, state.ownedWeapons);
+      return true;
+    }
+
+    if (itemId === 'smoke_grenade') {
+      if (weaponSystem.state.smokeGrenades >= 2) return false;
+      state.credits -= cost;
+      weaponSystem.state.smokeGrenades += 1;
+      hud.updateCash(state.credits);
+      hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name, weaponSystem.state.config.category, weaponSystem.state.heGrenades, weaponSystem.state.smokeGrenades);
+      hud.showBuyMenu(state.credits, state.ownedWeapons);
+      return true;
+    }
+
     state.credits -= cost;
     state.ownedWeapons.add(itemId);
     weaponSystem.selectWeapon(itemId);
     hud.updateCash(state.credits);
-    hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name);
+    hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name, weaponSystem.state.config.category, weaponSystem.state.heGrenades, weaponSystem.state.smokeGrenades);
     hud.showBuyMenu(state.credits, state.ownedWeapons);
     return true;
   }
 
   function addKillReward() {
     state.credits += 300;
+    state.playerStats.kills += 1;
     hud.updateCash(state.credits);
+  }
+
+  function syncScoreboard(botsManager) {
+    const aeroRoster = [
+      {
+        name: 'Operative (You)',
+        role: 'ASSAULT',
+        alive: !player.state.dead,
+        kills: state.playerStats.kills,
+        deaths: state.playerStats.deaths,
+        credits: state.credits,
+      },
+    ];
+
+    const helixRoster = [];
+
+    botsManager.bots.forEach((b) => {
+      const s = state.rosterStats[b.id] || { kills: 0, deaths: 0, credits: 1200 };
+      const item = {
+        name: b.name,
+        role: b.role,
+        alive: !b.dead,
+        kills: s.kills,
+        deaths: s.deaths,
+        credits: s.credits,
+      };
+      if (b.team === 'aero') {
+        aeroRoster.push(item);
+      } else {
+        helixRoster.push(item);
+      }
+    });
+
+    hud.updateScoreboard(aeroRoster, helixRoster);
   }
 
   function startNewRound() {
@@ -68,16 +134,15 @@ export function createRoundManager(world, hud, weaponSystem, player) {
     state.defuseProgress = 0;
     state.roundOutcome = null;
 
-    // Reset player position and weapon
     player.respawn(new THREE.Vector3(0, 0, -28));
     weaponSystem.state.mag = weaponSystem.state.config.magSize;
     weaponSystem.state.reserve = weaponSystem.state.config.reserveMax;
 
     hud.hideEndScreen();
     hud.updateScores(state.scoreAero, state.scoreHelix);
-    hud.updateClock('01:40', 'FREEZE PHASE: SHOP OPEN');
+    hud.updateClock('01:40', 'FREEZE PHASE: SHOP OPEN', `ROUND ${state.roundNumber} / ${state.maxRounds}`);
     hud.updateCash(state.credits);
-    hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name);
+    hud.updateAmmo(weaponSystem.state.mag, weaponSystem.state.reserve, weaponSystem.state.config.name, weaponSystem.state.config.category, weaponSystem.state.heGrenades, weaponSystem.state.smokeGrenades);
     hud.updateHealth(player.state.hp);
     hud.updateShield(player.state.shield);
     hud.hideActionPrompt();
@@ -93,15 +158,21 @@ export function createRoundManager(world, hud, weaponSystem, player) {
     const won = winner === 'aero';
     if (won) {
       state.scoreAero += 1;
-      state.credits += 3250;
-      state.roundOutcome = { title: 'ROUND SECURED', won: true, reason, reward: 3250 };
+      state.lossStreak = 0;
+      const reward = 3250;
+      state.credits += reward;
+      state.roundOutcome = { title: 'ROUND SECURED', won: true, reason, reward };
       soundEngine.playRoundEnd(true);
     } else {
       state.scoreHelix += 1;
-      state.credits += 1400;
-      state.roundOutcome = { title: 'ROUND LOST', won: false, reason, reward: 1400 };
+      state.lossStreak += 1;
+      const reward = Math.min(2400, 1400 + (state.lossStreak - 1) * 500);
+      state.credits += reward;
+      state.roundOutcome = { title: 'ROUND LOST', won: false, reason, reward };
       soundEngine.playRoundEnd(false);
     }
+
+    if (player.state.dead) state.playerStats.deaths += 1;
 
     hud.updateScores(state.scoreAero, state.scoreHelix);
     hud.showEndScreen(state.roundOutcome, state.scoreAero, state.scoreHelix);
@@ -114,9 +185,11 @@ export function createRoundManager(world, hud, weaponSystem, player) {
   }
 
   function step(dt, botsManager, keys, effects) {
+    syncScoreboard(botsManager);
+
     if (state.phase === 'START_FREEZE') {
       state.timer -= dt;
-      hud.updateClock(`00:0${Math.max(0, Math.ceil(state.timer))}`, 'TACTICAL FREEZE');
+      hud.updateClock(`00:0${Math.max(0, Math.ceil(state.timer))}`, 'TACTICAL FREEZE', `ROUND ${state.roundNumber} / ${state.maxRounds}`);
       if (state.timer <= 0) {
         state.phase = 'ROUND_LIVE';
         state.roundClock = 100;
@@ -131,11 +204,12 @@ export function createRoundManager(world, hud, weaponSystem, player) {
         state.roundNumber += 1;
         startNewRound();
         botsManager.resetBots();
+        if (effects) effects.clear();
       }
       return;
     }
 
-    // Check eliminations
+    // Check squad eliminations
     const aliveAero = (!player.state.dead ? 1 : 0) + botsManager.bots.filter((b) => b.team === 'aero' && !b.dead).length;
     const aliveHelix = botsManager.bots.filter((b) => b.team === 'helix' && !b.dead).length;
 
@@ -153,7 +227,7 @@ export function createRoundManager(world, hud, weaponSystem, player) {
       state.roundClock -= dt;
       const mins = Math.floor(state.roundClock / 60);
       const secs = Math.floor(state.roundClock % 60);
-      hud.updateClock(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`, 'TACTICAL ASSAULT');
+      hud.updateClock(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`, 'TACTICAL ASSAULT', `ROUND ${state.roundNumber} / ${state.maxRounds}`);
 
       if (state.roundClock <= 0) {
         endRound('aero', 'TIME EXPIRED: RELAY PRESERVED');
@@ -187,10 +261,11 @@ export function createRoundManager(world, hud, weaponSystem, player) {
     // Beacon planted countdown
     if (state.phase === 'BEACON_PLANTED') {
       state.plantedTime -= dt;
-      hud.updateClock(`00:${String(Math.max(0, Math.floor(state.plantedTime))).padStart(2, '0')}`, `BEACON ACTIVE AT SITE ${state.plantedSite}`);
+      hud.updateClock(`00:${String(Math.max(0, Math.floor(state.plantedTime))).padStart(2, '0')}`, `BEACON ACTIVE AT SITE ${state.plantedSite}`, `ROUND ${state.roundNumber} / ${state.maxRounds}`);
 
-      // Periodic warning beep
-      if (Math.floor(state.plantedTime * 2) % 2 === 0 && Math.random() < 0.15) {
+      // Warning beep with accelerating tempo
+      const beepInterval = state.plantedTime < 10 ? 0.4 : (state.plantedTime < 20 ? 0.8 : 1.4);
+      if (Math.floor(state.plantedTime / beepInterval) !== Math.floor((state.plantedTime + dt) / beepInterval)) {
         soundEngine.playBeaconBeep(state.plantedTime < 10);
       }
 
@@ -213,6 +288,7 @@ export function createRoundManager(world, hud, weaponSystem, player) {
           hud.updateActionProgress(state.defuseProgress / state.defuseTargetTime);
           if (state.defuseProgress >= state.defuseTargetTime) {
             hud.hideActionPrompt();
+            state.credits += 300;
             endRound('aero', 'QUANTUM BEACON DISARMED');
             return;
           }
@@ -233,6 +309,7 @@ export function createRoundManager(world, hud, weaponSystem, player) {
     closeBuyMenu,
     buyItem,
     addKillReward,
+    syncScoreboard,
     startNewRound,
     endRound,
     step,

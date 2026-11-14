@@ -8,6 +8,7 @@ import {
   createCrateTexture,
   createBeaconSiteTexture,
   createWallPanelTexture,
+  createSignageTexture,
 } from './textures.js';
 
 export function createWorld(scene) {
@@ -23,10 +24,15 @@ export function createWorld(scene) {
   metalTex.repeat.set(6, 6);
   const hazardTex = createHazardTexture();
   hazardTex.repeat.set(8, 1);
-  const crateTexA = createCrateTexture('AERO-SEC');
-  const crateTexB = createCrateTexture('HELIX-7');
-  const siteATex = createBeaconSiteTexture('BEACON ALPHA');
-  const siteBTex = createBeaconSiteTexture('BEACON BRAVO');
+  const crateTexA = createCrateTexture('AERO-SEC', '#38bdf8');
+  const crateTexB = createCrateTexture('HELIX-7', '#ef4444');
+  const crateTexMid = createCrateTexture('SECTOR-7', '#f59e0b');
+  const siteATex = createBeaconSiteTexture('A', 'REACTOR CORE');
+  const siteBTex = createBeaconSiteTexture('B', 'DATA ARCHIVE');
+
+  const signAlphaTex = createSignageTexture('SITE A', 'REACTOR CORE & CATWALK', 'SEC-07A');
+  const signBravoTex = createSignageTexture('SITE B', 'QUANTUM DATA-HUB', 'SEC-07B');
+  const signMidTex = createSignageTexture('MID CONDUIT', 'CENTRAL POWER CORRIDOR', 'SEC-07M');
 
   const matFloor = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, metalness: 0.1 });
   const matWall = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.7, metalness: 0.3 });
@@ -34,27 +40,29 @@ export function createWorld(scene) {
   const matHazard = new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.6, metalness: 0.2 });
   const matCrateA = new THREE.MeshStandardMaterial({ map: crateTexA, roughness: 0.65, metalness: 0.2 });
   const matCrateB = new THREE.MeshStandardMaterial({ map: crateTexB, roughness: 0.65, metalness: 0.2 });
+  const matCrateMid = new THREE.MeshStandardMaterial({ map: crateTexMid, roughness: 0.65, metalness: 0.2 });
   const matSiteA = new THREE.MeshStandardMaterial({ map: siteATex, roughness: 0.6, metalness: 0.2 });
   const matSiteB = new THREE.MeshStandardMaterial({ map: siteBTex, roughness: 0.6, metalness: 0.2 });
   const matTrim = new THREE.MeshStandardMaterial({ color: PALETTE.border, roughness: 0.5, metalness: 0.6 });
+  const matSignAlpha = new THREE.MeshBasicMaterial({ map: signAlphaTex });
+  const matSignBravo = new THREE.MeshBasicMaterial({ map: signBravoTex });
+  const matSignMid = new THREE.MeshBasicMaterial({ map: signMidTex });
 
   // Main ground plane
   const groundGeo = new THREE.PlaneGeometry(80, 80);
   const groundMesh = new THREE.Mesh(groundGeo, matFloor);
   groundMesh.rotation.x = -Math.PI / 2;
-  groundMesh.position.y = 0;
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
   shootables.push(groundMesh);
 
-  // Ceiling for interior feel with open skylights
+  // Ceiling
   const roofGeo = new THREE.PlaneGeometry(80, 80);
   const roofMesh = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: PALETTE.concreteDark, roughness: 0.9 }));
   roofMesh.rotation.x = Math.PI / 2;
   roofMesh.position.y = 7.0;
   scene.add(roofMesh);
 
-  // Helper to add solid rectangular box with collider
   function addBox(x, y, z, w, h, d, mat, addToColliders = true) {
     const geo = new THREE.BoxGeometry(w, h, d);
     const mesh = new THREE.Mesh(geo, mat);
@@ -73,6 +81,15 @@ export function createWorld(scene) {
     return mesh;
   }
 
+  function addSign(x, y, z, w, h, mat, rotY = 0) {
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotY;
+    scene.add(mesh);
+    return mesh;
+  }
+
   // --- Outer Perimeter Walls (80x80 area, wall height 6.0) ---
   const wallH = 6.0;
   addBox(0, 0, -38, 76, wallH, 2, matWall); // North
@@ -84,7 +101,7 @@ export function createWorld(scene) {
   // West Lane divider (separates Lane Alpha from Mid)
   addBox(-12, 0, -18, 2, wallH, 24, matWall);
   addBox(-12, 0, 18, 2, wallH, 24, matWall);
-  // West connector arch / doorway at Z=0 (opening from X=-14 to X=-10, Z=-6 to +6)
+  // West connector arch / doorway at Z=0
   addBox(-12, 3.6, 0, 2, 2.4, 12, matTrim);
 
   // East Lane divider (separates Mid from Lane Bravo)
@@ -93,22 +110,28 @@ export function createWorld(scene) {
   // East connector arch at Z=0
   addBox(12, 3.6, 0, 2, 2.4, 12, matTrim);
 
+  // Connector Signage
+  addSign(-10.9, 4.2, 0, 3.6, 1.8, matSignAlpha, -Math.PI / 2);
+  addSign(-13.1, 4.2, 0, 3.6, 1.8, matSignMid, Math.PI / 2);
+  addSign(10.9, 4.2, 0, 3.6, 1.8, matSignBravo, Math.PI / 2);
+  addSign(13.1, 4.2, 0, 3.6, 1.8, matSignMid, -Math.PI / 2);
+
   // --- Mid Corridor Features ---
   // Mid central bunker pillar
   addBox(0, 0, 0, 5, wallH, 5, matWall);
   // Hazard stripe trim at base of pillar
   addBox(0, 0, -2.6, 5.2, 0.4, 0.2, matHazard, false);
   addBox(0, 0, 2.6, 5.2, 0.4, 0.2, matHazard, false);
+  addSign(0, 3.8, -2.6, 3.2, 1.6, matSignMid, 0);
 
-  // Mid cover crates
+  // Mid cover crates & flanking boxes
   addBox(-3, 0, -8, 2.2, 2.2, 2.2, matCrateA);
   addBox(3.5, 0, -10, 2.2, 2.2, 2.2, matCrateB);
-  addBox(3.5, 2.2, -10, 2.0, 2.0, 2.0, matCrateA);
+  addBox(3.5, 2.2, -10, 2.0, 2.0, 2.0, matCrateMid);
   addBox(-2.5, 0, 9, 2.2, 2.2, 2.2, matCrateB);
   addBox(3.0, 0, 8, 2.2, 2.2, 2.2, matCrateA);
 
   // --- Lane Alpha & Site Alpha (West side) ---
-  // Site Alpha ground decal pad (at X=-24, Z=6)
   const siteAGround = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), matSiteA);
   siteAGround.rotation.x = -Math.PI / 2;
   siteAGround.position.set(-24, 0.02, 6);
@@ -127,9 +150,9 @@ export function createWorld(scene) {
   addBox(-18, 0, 14, 2.4, 2.4, 4.8, matCrateA); // Cargo container
   addBox(-31, 0, 8, 3.0, 2.4, 3.0, matCrateB);  // Generator stack
   addBox(-26, 0, -22, 2.2, 2.2, 2.2, matCrateA); // Alpha lane corner box
+  addSign(-36.9, 3.8, 6, 4.2, 2.1, matSignAlpha, Math.PI / 2);
 
   // --- Lane Bravo & Site Bravo (East side) ---
-  // Site Bravo ground decal pad (at X=24, Z=6)
   const siteBGround = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), matSiteB);
   siteBGround.rotation.x = -Math.PI / 2;
   siteBGround.position.set(24, 0.02, 6);
@@ -139,17 +162,18 @@ export function createWorld(scene) {
   // Site Bravo reactor pillar
   addBox(24, 0, 6, 3.2, 4.5, 3.2, matWall);
   addBox(24, 0, 6, 4.0, 0.6, 4.0, matHazard, false);
+  addSign(36.9, 3.8, 6, 4.2, 2.1, matSignBravo, -Math.PI / 2);
 
   // Bravo tactical cover crates & barriers
   addBox(18, 0, 15, 2.4, 2.4, 2.4, matCrateB);
-  addBox(30, 0, -6, 2.2, 2.2, 4.4, matCrateA);
+  addBox(30, 0, -6, 2.2, 2.2, 4.4, matCrateMid);
   addBox(22, 0, -20, 2.2, 2.2, 2.2, matCrateB);
   addBox(31, 0, 14, 2.4, 2.4, 2.4, matCrateA);
 
   // --- AeroSec Spawn (North Base Z=-30) ---
   addBox(0, 0, -26, 6, 1.4, 1.8, matCrateA);
   addBox(-6, 0, -28, 2.2, 2.2, 2.2, matCrateB);
-  addBox(6, 0, -28, 2.2, 2.2, 2.2, matCrateA);
+  addBox(6, 0, -28, 2.2, 2.2, 2.2, matCrateMid);
 
   // --- Helix Spawn (South Base Z=30) ---
   addBox(0, 0, 26, 6, 1.4, 1.8, matCrateB);
@@ -157,12 +181,10 @@ export function createWorld(scene) {
   addBox(5, 0, 28, 2.2, 2.2, 2.2, matCrateB);
 
   // --- Lighting Scheme ---
-  // Ambient illumination
-  const ambient = new THREE.AmbientLight(PALETTE.skyLight, 1.3);
+  const ambient = new THREE.AmbientLight(PALETTE.skyLight, 1.35);
   scene.add(ambient);
 
-  // Key directional sun
-  const dirLight = new THREE.DirectionalLight(PALETTE.sunLight, 2.4);
+  const dirLight = new THREE.DirectionalLight(PALETTE.sunLight, 2.5);
   dirLight.position.set(24, 38, -18);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 1024;
@@ -177,24 +199,33 @@ export function createWorld(scene) {
   scene.add(dirLight);
 
   // Tactical beacon glow at Site Alpha (Emerald)
-  const lightSiteA = new THREE.PointLight(PALETTE.siteAlphaGlow, 3.2, 18, 1.2);
+  const lightSiteA = new THREE.PointLight(PALETTE.siteAlphaGlow, 3.4, 20, 1.2);
   lightSiteA.position.set(-24, 3.2, 6);
   scene.add(lightSiteA);
 
   // Tactical beacon glow at Site Bravo (Cyan)
-  const lightSiteB = new THREE.PointLight(PALETTE.siteBravoGlow, 3.2, 18, 1.2);
+  const lightSiteB = new THREE.PointLight(PALETTE.siteBravoGlow, 3.4, 20, 1.2);
   lightSiteB.position.set(24, 3.2, 6);
   scene.add(lightSiteB);
 
   // Mid corridor warm accent
-  const lightMid = new THREE.PointLight(PALETTE.accent, 2.2, 14, 1.2);
+  const lightMid = new THREE.PointLight(PALETTE.midLight, 2.4, 16, 1.2);
   lightMid.position.set(0, 3.8, 0);
   scene.add(lightMid);
 
-  // Objective locations for plant/defuse
+  // Connectors illumination
+  const lightConnA = new THREE.PointLight(0x38bdf8, 1.8, 12, 1.2);
+  lightConnA.position.set(-12, 3.2, 0);
+  scene.add(lightConnA);
+
+  const lightConnB = new THREE.PointLight(0x06b6d4, 1.8, 12, 1.2);
+  lightConnB.position.set(12, 3.2, 0);
+  scene.add(lightConnB);
+
+  // Objective locations
   const sites = {
-    alpha: { id: 'A', name: 'Site Alpha', position: new THREE.Vector3(-24, 0, 6), radius: 5.5 },
-    bravo: { id: 'B', name: 'Site Bravo', position: new THREE.Vector3(24, 0, 6), radius: 5.5 },
+    alpha: { id: 'A', name: 'Site Alpha (Reactor)', position: new THREE.Vector3(-24, 0, 6), radius: 5.5 },
+    bravo: { id: 'B', name: 'Site Bravo (Data-Hub)', position: new THREE.Vector3(24, 0, 6), radius: 5.5 },
   };
 
   // Tactical navigation waypoints for Bot AI
