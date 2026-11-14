@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sector-7: Tactical FPS</title>
+<style>
+  :root {
+    --canvas: #0d1117;
+    --surface: #161b22;
+    --surface-alt: #21262d;
+    --border: #30363d;
+    --ink: #f0f6fc;
+    --muted: #8b949e;
+    --accent: #f59e0b;
+    --team-aero: #38bdf8;
+    --team-helix: #ef4444;
+    --plant: #10b981;
+    --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    user-select: none;
+  }
+  #game, #game canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  #hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Crosshair with dynamic bloom */
+  #reticle {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, -50%);
+  }
+  #reticle i {
+    position: absolute;
+    background: #ffffff;
+    opacity: 0.9;
+    box-shadow: 0 0 2px rgba(0,0,0,0.8);
+    transition: transform 40ms linear;
+  }
+  #ret-top { left: 15px; top: 0; width: 2px; height: 8px; }
+  #ret-bottom { left: 15px; bottom: 0; width: 2px; height: 8px; }
+  #ret-left { top: 15px; left: 0; height: 2px; width: 8px; }
+  #ret-right { top: 15px; right: 0; height: 2px; width: 8px; }
+  #ret-dot { left: 15px; top: 15px; width: 2px; height: 2px; background: var(--accent); }
+
+  /* Hitmarker */
+  #hitmarker {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 24px;
+    height: 24px;
+    transform: translate(-50%, -50%) rotate(45deg);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 70ms ease-out;
+  }
+  #hitmarker.active { opacity: 1; }
+  #hitmarker i { position: absolute; background: #ffffff; box-shadow: 0 0 4px var(--accent); }
+  #hitmarker.headshot i { background: var(--accent); }
+  #hitmarker i:nth-child(1) { left: 11px; top: 0; width: 2px; height: 7px; }
+  #hitmarker i:nth-child(2) { left: 11px; bottom: 0; width: 2px; height: 7px; }
+  #hitmarker i:nth-child(3) { top: 11px; left: 0; height: 2px; width: 7px; }
+  #hitmarker i:nth-child(4) { top: 11px; right: 0; height: 2px; width: 7px; }
+
+  /* Top match header */
+  #header {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    background: rgba(13, 17, 23, 0.85);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 16px;
+    gap: 16px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+  .team-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+  }
+  .team-aero { color: var(--team-aero); }
+  .team-helix { color: var(--team-helix); }
+  .score-num {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    padding: 2px 8px;
+    background: var(--surface-alt);
+    border-radius: 4px;
+  }
+  #round-clock {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--ink);
+    min-width: 60px;
+    text-align: center;
+  }
+  #round-phase {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-align: center;
+  }
+
+  /* Bottom status bars */
+  #player-stats {
+    position: fixed;
+    left: 32px;
+    bottom: 24px;
+    display: flex;
+    gap: 16px;
+  }
+  .stat-card {
+    background: rgba(22, 27, 34, 0.85);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 16px;
+    min-width: 110px;
+    backdrop-filter: blur(4px);
+  }
+  .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .stat-val {
+    font-family: var(--font-mono);
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  #hp-val { color: var(--plant); }
+  #ap-val { color: var(--team-aero); }
+
+  /* Ammo & weapon readout */
+  #weapon-panel {
+    position: fixed;
+    right: 32px;
+    bottom: 24px;
+    text-align: right;
+    background: rgba(22, 27, 34, 0.85);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 20px;
+    backdrop-filter: blur(4px);
+  }
+  #gun-name {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  #ammo-readout {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 8px;
+    font-family: var(--font-mono);
+    line-height: 1;
+    margin-top: 4px;
+  }
+  #mag-val {
+    font-size: 40px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  #res-val {
+    font-size: 18px;
+    color: var(--muted);
+  }
+  #cash-tag {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--plant);
+    margin-top: 4px;
+  }
+
+  /* Interaction & Objective Progress Bar */
+  #action-prompt {
+    position: fixed;
+    top: 60%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    background: rgba(13, 17, 23, 0.85);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 18px;
+    display: none;
+  }
+  #action-bar-wrap {
+    width: 200px;
+    height: 8px;
+    background: var(--surface-alt);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  #action-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--plant);
+    transition: width 50ms linear;
+  }
+
+  /* Killfeed in top right */
+  #killfeed {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .kill-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(22, 27, 34, 0.88);
+    border-left: 3px solid var(--team-aero);
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    animation: fadeCard 4s forwards;
+  }
+  .kill-card.enemy-kill { border-left-color: var(--team-helix); }
+  .kill-weapon {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--surface-alt);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .kill-head { color: var(--accent); font-size: 13px; }
+  @keyframes fadeCard {
+    0% { opacity: 0; transform: translateX(20px); }
+    10% { opacity: 1; transform: translateX(0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Fullscreen Overlays (Buy Menu, Start, End) */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: rgba(13, 17, 23, 0.88);
+    z-index: 50;
+    backdrop-filter: blur(6px);
+  }
+  .modal-overlay[hidden] { display: none; }
+  .panel-box {
+    width: min(780px, 94vw);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+  }
+  .panel-box h2 {
+    margin: 0 0 6px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .panel-box p {
+    margin: 0 0 20px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Buy Menu Grid */
+  .buy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .buy-card {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 120ms ease;
+  }
+  .buy-card:hover { border-color: var(--accent); }
+  .buy-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .buy-type { font-size: 11px; text-transform: uppercase; color: var(--muted); }
+  .buy-specs { font-size: 12px; color: var(--muted); margin: 8px 0; font-family: var(--font-mono); }
+  .buy-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .buy-cost { font-family: var(--font-mono); font-weight: 700; color: var(--plant); }
+  .btn-buy {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 14px;
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .btn-buy:disabled {
+    background: var(--border);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+
+  /* Controls list */
+  .ctrl-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin: 16px 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .ctrl-list li { display: flex; align-items: center; gap: 8px; }
+  .ctrl-list kbd {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    color: var(--ink);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 24px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 120ms ease;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+
+  /* End of round banner */
+  #round-outcome-banner {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .win-text { color: var(--plant); text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+  .loss-text { color: var(--team-helix); text-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud">
+  <div id="reticle">
+    <i id="ret-top"></i>
+    <i id="ret-bottom"></i>
+    <i id="ret-left"></i>
+    <i id="ret-right"></i>
+    <i id="ret-dot"></i>
+  </div>
+
+  <div id="hitmarker">
+    <i></i><i></i><i></i><i></i>
+  </div>
+
+  <div id="header">
+    <div class="team-status team-aero">
+      <span>AERO-SEC</span>
+      <span id="score-aero" class="score-num">0</span>
+    </div>
+    <div>
+      <div id="round-clock">01:45</div>
+      <div id="round-phase">TACTICAL ASSAULT</div>
+    </div>
+    <div class="team-status team-helix">
+      <span id="score-helix" class="score-num">0</span>
+      <span>HELIX-SYN</span>
+    </div>
+  </div>
+
+  <div id="player-stats">
+    <div class="stat-card">
+      <div class="stat-label">VITAL INTEGRITY</div>
+      <div id="hp-val" class="stat-val">100</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">ENERGY SHIELD</div>
+      <div id="ap-val" class="stat-val">100</div>
+    </div>
+  </div>
+
+  <div id="weapon-panel">
+    <div id="gun-name">PHALANX-4 CARBINE</div>
+    <div id="ammo-readout">
+      <span id="mag-val">30</span>
+      <span id="res-val">/ 90</span>
+    </div>
+    <div id="cash-tag">$3,400 CREDITS</div>
+  </div>
+
+  <div id="action-prompt">
+    <div id="action-text">HOLD [E] TO CALIBRATE BEACON</div>
+    <div id="action-bar-wrap">
+      <div id="action-bar-fill"></div>
+    </div>
+  </div>
+
+  <div id="killfeed"></div>
+</div>
+
+<!-- Buy Menu Overlay -->
+<div id="overlay-buy" class="modal-overlay" hidden>
+  <div class="panel-box">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <h2>REQUISITION TERMINAL</h2>
+        <p>Procure tactical equipment for the upcoming engagement phase.</p>
+      </div>
+      <div style="font-family:var(--font-mono); font-size:24px; color:var(--plant); font-weight:700;" id="buy-cash-display">$3,400</div>
+    </div>
+    <div class="buy-grid" id="buy-grid-container"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:12px; color:var(--muted);"><kbd style="background:var(--surface-alt); padding:2px 6px; border-radius:4px; border:1px solid var(--border);">B</kbd> or <kbd style="background:var(--surface-alt); padding:2px 6px; border-radius:4px; border:1px solid var(--border);">ESC</kbd> to exit terminal</span>
+      <button id="btn-close-buy" class="btn-primary" type="button">CONFIRM LOADOUT</button>
+    </div>
+  </div>
+</div>
+
+<!-- Round Decided Overlay -->
+<div id="overlay-end" class="modal-overlay" hidden>
+  <div class="panel-box" style="text-align:center;">
+    <div id="round-outcome-banner" class="win-text">ROUND SECURED</div>
+    <p id="round-outcome-sub">AeroSec operatives eliminated hostile presence and preserved the relay.</p>
+    <div style="background:var(--surface-alt); border:1px solid var(--border); border-radius:6px; padding:16px; margin:20px 0; display:flex; justify-content:space-around;">
+      <div>
+        <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">CREDITS EARNED</div>
+        <div id="end-cash-earned" style="font-family:var(--font-mono); font-size:24px; color:var(--plant); font-weight:700;">+$3,250</div>
+      </div>
+      <div>
+        <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">ROUND REASON</div>
+        <div id="end-reason" style="font-size:16px; font-weight:600; margin-top:4px;">HOSTILES NEUTRALIZED</div>
+      </div>
+      <div>
+        <div style="font-size:11px; color:var(--muted); text-transform:uppercase;">MATCH STATUS</div>
+        <div id="end-match-score" style="font-family:var(--font-mono); font-size:24px; font-weight:700;">1 - 0</div>
+      </div>
+    </div>
+    <button id="btn-next-round" class="btn-primary" type="button">READY FOR NEXT ENGAGEMENT</button>
+  </div>
+</div>
+
+<!-- Initial Welcome Overlay -->
+<div id="overlay-start" class="modal-overlay">
+  <div class="panel-box">
+    <h2>SECTOR-7 RELAY DEFENSE</h2>
+    <p>AeroSec Tactical Force deployed to safeguard the Quantum Beacon relay network against Helix Syndicate breach units.</p>
+    <ul class="ctrl-list">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Tactical Movement</li>
+      <li><kbd>Mouse</kbd> Precision Aim</li>
+      <li><kbd>Left Click</kbd> Discharge Weapon</li>
+      <li><kbd>R</kbd> Tactical Reload</li>
+      <li><kbd>Shift / Ctrl</kbd> Stealth Crouch</li>
+      <li><kbd>Space</kbd> Kinetic Vault</li>
+      <li><kbd>B</kbd> Equipment Shop</li>
+      <li><kbd>E</kbd> Beacon Calibrate / Defuse</li>
+      <li><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> Weapon Selection</li>
+      <li><kbd>4</kbd> Deploy Aerosol Smoke</li>
+    </ul>
+    <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+      <span style="font-size:13px; color:var(--muted);">Eliminate all breach forces or secure beacon objectives.</span>
+      <button id="btn-enter-game" class="btn-primary" type="button">INITIALIZE OPERATIVE</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
